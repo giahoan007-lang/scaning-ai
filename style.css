@@ -27,6 +27,10 @@ body {
   flex-direction: column;
 }
 
+button {
+  font-family: inherit;
+}
+
 /* ================= TOP HEADER ================= */
 .top-bar {
   position: fixed;
@@ -111,7 +115,7 @@ img#preview-img { display: none; z-index: 2; }
   text-align: center;
   width: 88%;
   max-width: 340px;
-  background: rgba(18, 14, 12, 0.85);
+  background: rgba(18, 14, 12, 0.88);
   border: 1px solid var(--glass-border);
   padding: 14px;
   border-radius: 18px;
@@ -173,7 +177,7 @@ img#preview-img { display: none; z-index: 2; }
   top: 10%;
   opacity: 0;
 }
-.reticle.scanning .scan-line { opacity: 1; animation: scanSweep 1.5s infinite ease-in-out; }
+.reticle.scanning .scan-line { opacity: 1; animation: scanSweep 1.2s infinite ease-in-out; }
 @keyframes scanSweep { 0%, 100% { top: 8%; } 50% { top: 92%; } }
 
 .lens-sparkles i {
@@ -185,12 +189,12 @@ img#preview-img { display: none; z-index: 2; }
   box-shadow: 0 0 10px var(--gold);
   opacity: 0;
 }
-.reticle.scanning .lens-sparkles i { animation: twinkle 1.2s infinite ease-in-out; }
+.reticle.scanning .lens-sparkles i { animation: twinkle 1s infinite ease-in-out; }
 .lens-sparkles i:nth-child(1) { top: 22%; left: 28%; animation-delay: 0s; }
-.lens-sparkles i:nth-child(2) { top: 65%; left: 72%; animation-delay: 0.3s; }
-.lens-sparkles i:nth-child(3) { top: 40%; left: 55%; animation-delay: 0.6s; }
-.lens-sparkles i:nth-child(4) { top: 75%; left: 30%; animation-delay: 0.2s; }
-.lens-sparkles i:nth-child(5) { top: 28%; left: 75%; animation-delay: 0.5s; }
+.lens-sparkles i:nth-child(2) { top: 65%; left: 72%; animation-delay: 0.25s; }
+.lens-sparkles i:nth-child(3) { top: 40%; left: 55%; animation-delay: 0.5s; }
+.lens-sparkles i:nth-child(4) { top: 75%; left: 30%; animation-delay: 0.15s; }
+.lens-sparkles i:nth-child(5) { top: 28%; left: 75%; animation-delay: 0.4s; }
 @keyframes twinkle { 0%, 100% { opacity: 0; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.4); } }
 
 .scan-hint {
@@ -214,7 +218,7 @@ img#preview-img { display: none; z-index: 2; }
   background: transparent;
   border: 2px solid var(--gold);
   border-top-color: transparent;
-  animation: spin 0.8s linear infinite;
+  animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
