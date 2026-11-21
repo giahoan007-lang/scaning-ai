@@ -140,7 +140,6 @@ async function callGroqVision({ apiKey, model, prompt, imageBase64, timeoutMs = 
 
 async function handleChatMode({ apiKey, messages, locationContext }) {
   const models = await fetchWorkingGroqModels(apiKey);
-  // Ưu tiên model chat nhanh của Groq
   const sortedModels = [
     ...models.filter((m) => /llama-3\.3|llama-3\.1|gpt-oss|qwen/i.test(m)),
     ...models.filter((m) => !/llama-3\.3|llama-3\.1|gpt-oss|qwen/i.test(m))
@@ -188,8 +187,27 @@ module.exports = async (req, res) => {
 
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    const groqKey = String(process.env.GROQ_API_KEY || "").trim();
 
+    // --- CHẾ ĐỘ ĐỌC GIỌNG NÓI TIẾNG VIỆT TỰ NHIÊN (TTS) ---
+    if (body && body.mode === "tts") {
+      const text = String(body.text || "").trim().slice(0, 200);
+      if (!text) return res.status(400).json({ error: "Thiếu nội dung đọc." });
+
+      const ttsUrl = `https://translate.googleapis.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=vi&client=gtx`;
+      const ttsRes = await fetch(ttsUrl, {
+        headers: { "User-Agent": "Mozilla/5.0" }
+      });
+
+      if (!ttsRes.ok) {
+        return res.status(502).json({ error: "Không tải được giọng đọc." });
+      }
+
+      const arrayBuf = await ttsRes.arrayBuffer();
+      const audioBase64 = Buffer.from(arrayBuf).toString("base64");
+      return res.status(200).json({ audioBase64 });
+    }
+
+    const groqKey = String(process.env.GROQ_API_KEY || "").trim();
     if (!groqKey) {
       return res.status(400).json({ error: "Thiếu GROQ_API_KEY trên Vercel." });
     }
@@ -227,8 +245,8 @@ Yêu cầu nội dung:
      + "calo_uoc_tinh": Ước tính cụ thể lượng calo (hoặc ghi "Không áp dụng (vật dụng không ăn được)").
      + "tot_cho_suc_khoe": Đánh giá rõ có tốt cho sức khỏe không (hoặc độ an toàn khi dùng).
      + "chi_tiet_san_pham": Mô tả chi tiết thành phần, thương hiệu/xuất xứ, công dụng.
-     + "noi_mua_goi_y": Gợi ý cụ thể địa chỉ hoặc hệ thống cửa hàng uy tín tại Đà Nẵng – Hội An bán đúng vật phẩm này (VD: "Nhà sách Fahasa Đà Nẵng / Cửa hàng văn phòng phẩm", "Nhà thuốc Long Châu", "Siêu thị GO! / WinMart", "Cửa hàng điện tử FPT Shop / CellphoneS"...).
-     + "tu_khoa_mua_hang": Từ khóa ngắn gọn để tìm đúng nơi bán vật phẩm này trên Google Maps tại Đà Nẵng – Hội An (VD: "nhà sách văn phòng phẩm", "mua nước tăng lực Monster", "cửa hàng mỹ phẩm").
+     + "noi_mua_goi_y": Gợi ý cụ thể địa chỉ hoặc hệ thống cửa hàng uy tín tại Đà Nẵng – Hội An bán đúng vật phẩm này.
+     + "tu_khoa_mua_hang": Từ khóa ngắn gọn để tìm đúng nơi bán vật phẩm này trên Google Maps tại Đà Nẵng – Hội An.
    - Nếu là NHÓM ĐỊA ĐIỂM: đặt "hien_thi": false và để trống các chuỗi bên trong.
 4. "danh_gia_ban_dia": Tổng hợp nhận xét chân thực theo phong cách Local Guide Đà Nẵng – Hội An.
 5. "han_viet": CHỈ đặt "co_han_viet": true nếu ảnh THẬT SỰ CÓ CHỮ HÁN/NÔM.
@@ -264,7 +282,6 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
 }`;
 
     const models = await fetchWorkingGroqModels(groqKey);
-    const errors = [];
 
     for (const model of models) {
       try {
@@ -301,7 +318,6 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
             locationContext
           });
         } else {
-          // Tự động tìm nơi bán ĐÚNG vật phẩm vừa quét quanh khu vực Đà Nẵng - Hội An
           const buyQuery =
             result.thong_tin_san_pham?.tu_khoa_mua_hang ||
             `mua ${result.ten_dia_diem || "sản phẩm"}`;
@@ -316,15 +332,15 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
         }
 
         return res.status(200).json(result);
-      } catch (err) {
-        errors.push(err.message);
-      }
+      } catch (_) {}
     }
 
     return res.status(502).json({
-      error: "Opps! Mình không thể nhận diện được, có lẽ do bạn chụp không rõ hoặc mờ hoặc tối quá, bạn hãy giữ nguyên và để rõ giúp mình nhé😍: " + errors.slice(-3).join(" | ")
+      error: "Opps! Mình không thể nhận diện được, có lẽ do bạn chụp không rõ hoặc mờ hoặc tối quá, bạn hãy giữ nguyên và để rõ giúp mình nhé😍"
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message || "Lỗi máy chủ." });
+    return res.status(500).json({
+      error: "Opps! Mình không thể nhận diện được, có lẽ do bạn chụp không rõ hoặc mờ hoặc tối quá, bạn hãy giữ nguyên và để rõ giúp mình nhé😍"
+    });
   }
 };
