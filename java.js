@@ -19,6 +19,7 @@ const video = document.getElementById("video");
 const previewImg = document.getElementById("preview-img");
 const reticle = document.getElementById("reticle");
 const hintText = document.getElementById("hint-text");
+const cameraFallback = document.getElementById("camera-fallback");
 
 // Gắn sự kiện điều khiển
 document.getElementById("auto-toggle").addEventListener("click", toggleAutoScan);
@@ -26,6 +27,7 @@ document.getElementById("shutter-btn").addEventListener("click", manualCapture);
 document.getElementById("file-upload").addEventListener("change", handleFileUpload);
 document.getElementById("close-sheet-btn").addEventListener("click", closeSheet);
 document.getElementById("sheet-backdrop").addEventListener("click", closeSheet);
+document.getElementById("enable-cam-btn").addEventListener("click", startCamera);
 
 // Chuyển đổi 3 Tab dưới đáy
 document.querySelectorAll(".nav-item").forEach((btn) => {
@@ -47,17 +49,38 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 // ==========================================
-// 2. CAMERA & ĐỊNH VỊ GPS + OPENSTREETMAP
+// 2. CAMERA (TỐI ƯU IPHONE SAFARI) & GPS
 // ==========================================
 async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    cameraFallback.style.display = "block";
+    hintText.innerText = "Hãy mở link bằng trình duyệt Safari (không mở trong Telegram/Zalo)!";
+    return;
+  }
+
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment", width: { ideal: 1280 } },
-      audio: false
-    });
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } },
+        audio: false
+      });
+    } catch (e) {
+      // Dự phòng nếu thiết bị không có camera sau (ví dụ laptop)
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    }
+
     video.srcObject = stream;
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
+    video.muted = true;
+    await video.play();
+
+    cameraFallback.style.display = "none";
+    hintText.innerText = "Chĩa camera & giữ yên 1.2s vào di tích, biển hiệu, chữ Hán...";
   } catch (err) {
-    hintText.innerText = "Không mở được camera. Bấm 'Ảnh mẫu' ở góc phải để quét ngay!";
+    cameraFallback.style.display = "block";
+    hintText.innerText = "Chưa có quyền Camera. Hãy bấm nút vàng phía trên hoặc dùng Ảnh mẫu!";
   }
 }
 
@@ -80,7 +103,7 @@ function startGPSAndOverpass() {
       }
     },
     () => {
-      document.getElementById("gps-text").innerText = "Đà Nẵng • Hội An (Demo)";
+      document.getElementById("gps-text").innerText = "Đà Nẵng • Hội An";
     },
     { enableHighAccuracy: true }
   );
@@ -155,7 +178,6 @@ function autoScanLoop() {
 
   const currentSig = getFrameSignature();
 
-  // Nếu đang hiện kết quả cũ -> chờ người dùng xoay camera sang vật thể mới
   if (isLockedOnResult) {
     const moveDiff = calcFrameDiff(currentSig, lockedFrameData);
     if (moveDiff > 22) {
@@ -196,6 +218,10 @@ function toggleAutoScan() {
 
 function manualCapture() {
   if (isProcessing) return;
+  if (video.readyState < 2) {
+    startCamera();
+    return;
+  }
   previewImg.style.display = "none";
   lockedFrameData = getFrameSignature();
   captureAndAnalyze();
@@ -264,6 +290,11 @@ function extractTextFromPuter(response) {
 }
 
 async function analyzeImageFree(imageDataUrl) {
+  if (typeof puter === "undefined") {
+    alert("Chưa tải được thư viện AI (Puter.js). Hãy kiểm tra kết nối mạng và tải lại trang!");
+    return;
+  }
+
   isProcessing = true;
   reticle.classList.add("scanning");
   hintText.innerText = "AI đang nhận diện, phân tích Hán-Việt & tra cứu lịch sử...";
@@ -314,7 +345,6 @@ BẮT BUỘC trả về DUY NHẤT một chuỗi JSON thuần (không kèm markd
     try {
       response = await puter.ai.chat(prompt, imageDataUrl, { model: "gemini-2.5-flash" });
     } catch (modelErr) {
-      // Dự phòng tự động chuyển sang model mặc định của Puter nếu model trên bận
       response = await puter.ai.chat(prompt, imageDataUrl);
     }
 
@@ -324,7 +354,6 @@ BẮT BUỘC trả về DUY NHẤT một chuỗi JSON thuần (không kèm markd
     if (jsonStart === -1 || jsonEnd === -1) throw new Error("AI không trả về đúng định dạng dữ liệu.");
     const parsed = JSON.parse(rawText.slice(jsonStart, jsonEnd + 1));
 
-    // Thu thập thêm dữ liệu đối chiếu trực tiếp từ Wikipedia Tiếng Việt
     const wikiData = await fetchWikipediaSummary(parsed.ten_dia_diem);
     if (wikiData) parsed.wiki_source = wikiData;
 
@@ -352,7 +381,6 @@ function renderResult(data) {
   const bodyEl = document.getElementById("sheet-body");
   bodyEl.innerHTML = "";
 
-  // 1. Nút nghe thuyết minh giọng nói tiếng Việt
   const audioBtn = document.createElement("button");
   audioBtn.className = "audio-btn";
   audioBtn.innerHTML = "<span>🔊</span> <span>Nghe thuyết minh câu chuyện</span>";
@@ -360,7 +388,6 @@ function renderResult(data) {
     speakStory(`${data.ten_dia_diem}. ${data.cau_chuyen_lich_su} ${data.giai_thoai_dac_biet || ""}`);
   bodyEl.appendChild(audioBtn);
 
-  // 2. Thẻ Phân tích Hán-Việt / Hán Nôm chi tiết từng từ
   if (data.han_viet && data.han_viet.co_han_viet && (data.han_viet.chu_goc || data.han_viet.phien_am)) {
     const chipsHtml = (data.han_viet.phan_tich_tung_tu || [])
       .map((item) => `<span class="hanviet-chip">${item}</span>`)
@@ -378,7 +405,6 @@ function renderResult(data) {
     );
   }
 
-  // 3. Thẻ Câu chuyện lịch sử / Thông tin Shop & Nhà hàng
   bodyEl.insertAdjacentHTML(
     "beforeend",
     `<div class="info-box">
@@ -387,7 +413,6 @@ function renderResult(data) {
     </div>`
   );
 
-  // 4. Thẻ Giai thoại & Điểm độc đáo
   if (data.giai_thoai_dac_biet) {
     bodyEl.insertAdjacentHTML(
       "beforeend",
@@ -398,7 +423,6 @@ function renderResult(data) {
     );
   }
 
-  // 5. Thẻ Đánh giá thật của người dân địa phương + Form viết thêm review
   const placeKey = data.ten_dia_diem || "default";
   const aiReviews = (data.danh_gia_ban_dia && data.danh_gia_ban_dia.review_mau) || [];
   const savedUserReviews = customReviews[placeKey] || [];
@@ -437,7 +461,6 @@ function renderResult(data) {
     inp.value = "";
   });
 
-  // 6. Nguồn dữ liệu trực tiếp từ Google Maps & Wikipedia
   const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(data.ten_dia_diem + " " + (data.dia_chi || "Đà Nẵng Hội An"))}`;
   const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(data.ten_dia_diem + " " + (data.dia_chi || "Đà Nẵng Hội An"))}`;
 
