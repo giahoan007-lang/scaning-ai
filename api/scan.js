@@ -6,93 +6,78 @@ function extractJson(rawText) {
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
   if (start === -1 || end === -1) {
-    throw new Error("Không tìm thấy JSON hợp lệ trong phản hồi AI.");
+    throw new Error("Không tìm thấy JSON hợp lệ trong phản hồi.");
   }
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-function getKeyList(envVal) {
-  if (!envVal) return [];
-  const keys = envVal
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  for (let i = keys.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [keys[i], keys[j]] = [keys[j], keys[i]];
+async function fetchWorkingGroqModels(apiKey) {
+  const res = await fetch("https://api.groq.com/openai/v1/models", {
+    headers: { Authorization: `Bearer ${apiKey}` }
+  });
+  if (!res.ok) {
+    throw new Error(`Không lấy được danh sách model Groq (HTTP ${res.status}).`);
   }
-  return keys;
+  const data = await res.json();
+  const allIds = (data.data || []).map((m) => m.id).filter(Boolean);
+
+  // Ưu tiên các model có thể đọc ảnh / multimodal đang active trên Groq, loại bỏ audio/guard/whisper
+  const activeModels = allIds.filter(
+    (id) => !/whisper|tts|guard|safeguard|embed|prompt-guard/i.test(id)
+  );
+
+  if (activeModels.length === 0) {
+    throw new Error("Không tìm thấy model khả dụng trên Groq.");
+  }
+
+  return activeModels;
 }
 
-async function callVisionProvider({
-  name,
-  url,
-  apiKey,
-  model,
-  prompt,
-  imageBase64,
-  useJsonFormat = true,
-  extraHeaders = {},
-  timeoutMs = 11000
-}) {
+async function callGroqModel({ apiKey, model, prompt, imageBase64, timeoutMs = 10000 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const headers = {
-      "Content-Type": "application/json",
-      ...extraHeaders
-    };
-    if (apiKey) {
-      headers["Authorization"] = `Bearer ${apiKey}`;
-    }
-
-    const payload = {
-      model,
-      temperature: 0.15,
-      max_tokens: 450,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/jpeg;base64,${imageBase64}`
-              }
-            }
-          ]
-        }
-      ]
-    };
-
-    if (useJsonFormat) {
-      payload.response_format = { type: "json_object" };
-    }
-
-    const res = await fetch(url, {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
-      headers,
-      body: JSON.stringify(payload),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.15,
+        max_tokens: 450,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${imageBase64}`
+                }
+              }
+            ]
+          }
+        ]
+      }),
       signal: controller.signal
     });
 
-    const rawBody = await res.text();
-    const trimmed = rawBody.trim();
+    const rawText = await res.text();
+    const trimmed = rawText.trim();
 
     if (!res.ok) {
-      throw new Error(`${name}[${model}] HTTP ${res.status}: ${trimmed.slice(0, 80)}`);
-    }
-
-    if (trimmed === "OK" || !trimmed.startsWith("{")) {
-      throw new Error(`${name}[${model}] phản hồi không phải JSON (${trimmed.slice(0, 40)})`);
+      throw new Error(`${model}: HTTP ${res.status} - ${trimmed.slice(0, 80)}`);
     }
 
     const parsed = JSON.parse(trimmed);
     const content = parsed.choices?.[0]?.message?.content;
     if (!content) {
-      throw new Error(`${name}[${model}] nội dung rỗng.`);
+      throw new Error(`${model}: Phản hồi rỗng.`);
     }
 
     return extractJson(content);
@@ -116,9 +101,14 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: "Thiếu dữ liệu ảnh." });
     }
 
+    const groqKey = String(process.env.GROQ_API_KEY || "").trim();
+    if (!groqKey) {
+      return res.status(400).json({ error: "Thiếu GROQ_API_KEY trên Vercel." });
+    }
+
     const prompt = `Bạn là chuyên gia văn hóa, lịch sử và thổ địa Đà Nẵng - Hội An.
 Ngữ cảnh vị trí: ${locationContext || "Đà Nẵng - Hội An"}.
-Hãy nhìn vào ảnh và nhận diện chính xác đối tượng (di tích, quán ăn, shop, workshop, đặc sản, hoặc vật thể/thiết bị thực tế). Trả lời ngắn gọn, súc tích bằng tiếng Việt.
+Nhận diện đối tượng trong ảnh (di tích, quán ăn, shop, workshop, đặc sản, hoặc vật thể). Trả lời ngắn gọn, súc tích bằng tiếng Việt.
 
 Quy tắc Hán-Việt:
 - CHỈ đặt "co_han_viet": true nếu trong ảnh THẬT SỰ CÓ CHỮ HÁN hoặc CHỮ NÔM.
@@ -128,9 +118,9 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
 {
   "loai_doi_tuong": "Di tích | Quán ăn | Shop & Workshop | Đặc sản | Hán Nôm | Vật thể",
   "ten_dia_diem": "Tên chính xác",
-  "dia_chi": "Địa chỉ ngắn gọn hoặc bối cảnh",
+  "dia_chi": "Địa chỉ ngắn gọn",
   "nien_dai_hoac_gia": "Niên đại hoặc mức giá tham khảo",
-  "cau_chuyen_lich_su": "Thông tin hoặc câu chuyện ngắn (2-3 câu ngắn).",
+  "cau_chuyen_lich_su": "Tóm tắt lịch sử hoặc thông tin nổi bật (2-3 câu ngắn).",
   "giai_thoai_dac_biet": "1 nét độc đáo hoặc giai thoại ngắn.",
   "han_viet": {
     "co_han_viet": false,
@@ -140,77 +130,19 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
     "y_nghia_tong_the": ""
   },
   "danh_gia_ban_dia": {
-    "tom_tat": "Nhận xét nhanh.",
+    "tom_tat": "Nhận xét nhanh từ người địa phương.",
     "review_mau": ["Nhận xét ngắn 1", "Nhận xét ngắn 2"]
   }
 }`;
 
-    const providers = [];
-
-    const groqKeys = getKeyList(process.env.GROQ_API_KEY);
-    const groqModels = [
-      "meta-llama/llama-4-scout-17b-16e-instruct",
-      "meta-llama/llama-4-maverick-17b-128e-instruct"
-    ];
-    for (const key of groqKeys) {
-      for (const model of groqModels) {
-        providers.push({
-          name: "Groq",
-          url: "https://api.groq.com/openai/v1/chat/completions",
-          apiKey: key,
-          model,
-          useJsonFormat: true,
-          timeoutMs: 9500
-        });
-      }
-    }
-
-    const openRouterKeys = getKeyList(process.env.OPENROUTER_API_KEY);
-    const openRouterModels = [
-      "openrouter/free",
-      "google/gemma-3-27b-it:free",
-      "meta-llama/llama-3.2-11b-vision-instruct:free"
-    ];
-    for (const key of openRouterKeys) {
-      for (const model of openRouterModels) {
-        providers.push({
-          name: "OpenRouter",
-          url: "https://openrouter.ai/api/v1/chat/completions",
-          apiKey: key,
-          model,
-          useJsonFormat: false,
-          extraHeaders: {
-            "HTTP-Referer": "https://ai-882b.vercel.app",
-            "X-Title": "Hon Pho AI"
-          },
-          timeoutMs: 11000
-        });
-      }
-    }
-
-    const githubTokens = getKeyList(process.env.GITHUB_TOKEN);
-    for (const token of githubTokens) {
-      providers.push({
-        name: "GitHub",
-        url: "https://models.github.ai/inference/chat/completions",
-        apiKey: token,
-        model: "openai/gpt-4o-mini",
-        useJsonFormat: false,
-        timeoutMs: 9500
-      });
-    }
-
-    if (providers.length === 0) {
-      return res.status(400).json({
-        error: "Dự án này chưa có GROQ_API_KEY hoặc OPENROUTER_API_KEY trong Vercel Environment Variables."
-      });
-    }
-
+    const models = await fetchWorkingGroqModels(groqKey);
     const errors = [];
-    for (const provider of providers) {
+
+    for (const model of models) {
       try {
-        const result = await callVisionProvider({
-          ...provider,
+        const result = await callGroqModel({
+          apiKey: groqKey,
+          model,
           prompt,
           imageBase64
         });
@@ -221,7 +153,7 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
     }
 
     return res.status(502).json({
-      error: errors.slice(-3).join(" | ")
+      error: "Không model Groq nào đọc được ảnh này: " + errors.slice(-3).join(" | ")
     });
   } catch (err) {
     return res.status(500).json({ error: err.message || "Lỗi máy chủ." });
