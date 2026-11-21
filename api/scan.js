@@ -322,7 +322,7 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
     }
 
     return res.status(502).json({
-      error: "Không model Groq nào đọc được ảnh này: " + errors.slice(-3).join(" | ")
+      error: "Opps! Mình không thể nhận diện được, có lẽ do bạn chụp không rõ hoặc mờ hoặc tối quá, bạn hãy giữ nguyên và để rõ giúp mình nhé😍: " + errors.slice(-3).join(" | ")
     });
   } catch (err) {
     return res.status(500).json({ error: err.message || "Lỗi máy chủ." });
