@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Hồn Phố AI — Khám Phá Di Sản & Bản Địa Đà Nẵng – Hội An</title>
+  <!-- Google Fonts: Playfair Display (Tiêu đề di sản) & Plus Jakarta Sans (UI hiện đại) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- 1. Modal Cấu hình API Key -->
+  <div id="setup-modal">
+    <div class="modal-card">
+      <div class="modal-emblem">🏮</div>
+      <h3>Hồn Phố AI</h3>
+      <p class="modal-sub">Trợ lý thị giác giải mã di sản, chữ Hán Nôm & góc nhìn thổ địa Đà Nẵng – Hội An.</p>
+      <label class="input-label">Gemini API Key (Google AI Studio)</label>
+      <input type="password" id="api-key-input" placeholder="Dán khóa AIzaSy... của bạn" />
+      <button id="save-key-btn" class="primary-btn">Kích hoạt ống kính AI</button>
+    </div>
+  </div>
+
+  <!-- 2. Top Header Kính Mờ -->
+  <header class="top-bar">
+    <div class="brand">
+      <span class="brand-icon">🏮</span>
+      <div>
+        <div class="brand-name">Hồn Phố AI</div>
+        <div class="brand-tag">ĐÀ NẴNG • HỘI AN</div>
+      </div>
+    </div>
+    <div class="gps-pill" id="gps-status">
+      <span class="gps-dot"></span>
+      <span id="gps-text">Đang định vị không gian...</span>
+    </div>
+    <button class="icon-btn" id="open-modal-btn" title="Cài đặt API">⚙️</button>
+  </header>
+
+  <!-- 3. Khung hiển thị chính (Chuyển đổi 3 Tab) -->
+  <main class="app-viewport">
+    
+    <!-- TAB 1: CAMERA QUÉT TỰ ĐỘNG (GOOGLE LENS) -->
+    <section id="tab-camera" class="tab-view active">
+      <video id="video" autoplay playsinline muted></video>
+      <img id="preview-img" alt="Ảnh đang phân tích" />
+      <div class="vignette-overlay"></div>
+
+      <!-- Khung ngắm & Hiệu ứng hạt sáng Google Lens -->
+      <div class="lens-overlay">
+        <div class="reticle" id="reticle">
+          <span></span>
+          <div class="scan-line"></div>
+          <div class="lens-sparkles">
+            <i></i><i></i><i></i><i></i><i></i>
+          </div>
+        </div>
+        <div class="scan-hint" id="scan-hint">
+          <div class="spinner-ring" id="scan-spinner"></div>
+          <span id="hint-text">Hướng ống kính & giữ yên 1.2s vào di sản, biển hiệu...</span>
+        </div>
+      </div>
+
+      <!-- Thanh điều khiển Camera -->
+      <div class="camera-dock">
+        <button class="dock-pill active" id="auto-toggle">
+          <span>⚡</span> <span id="auto-label">Tự động</span>
+        </button>
+
+        <button class="shutter-btn" id="shutter-btn" title="Quét ngay">
+          <div class="shutter-inner"></div>
+        </button>
+
+        <label class="dock-pill" style="cursor:pointer;">
+          <span>🖼️</span> <span>Ảnh mẫu</span>
+          <input type="file" id="file-upload" accept="image/*" style="display:none" />
+        </label>
+      </div>
+    </section>
+
+    <!-- TAB 2: RADAR ĐỊA ĐIỂM QUANH BẠN -->
+    <section id="tab-nearby" class="tab-view">
+      <div class="page-container">
+        <div class="page-header">
+          <h2>Radar Di Sản & Quán Quen</h2>
+          <p>Tự động quét dữ liệu bản đồ trong bán kính 100m quanh vị trí của bạn</p>
+        </div>
+        <div id="nearby-list" class="nearby-grid">
+          <div class="empty-state">Đang dò tìm các địa điểm lân cận qua OpenStreetMap...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: SỔ TAY LỊCH SỬ ĐÃ QUÉT -->
+    <section id="tab-history" class="tab-view">
+      <div class="page-container">
+        <div class="page-header">
+          <h2>Hành Trình Đã Khám Phá</h2>
+          <p>Lưu trữ các di sản, bản dịch Hán Nôm và quán ngon bạn vừa quét</p>
+        </div>
+        <div id="history-list" class="nearby-grid">
+          <div class="empty-state">Chưa có địa điểm nào được quét. Hãy thử chĩa camera vào một di tích hoặc quán ăn!</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 4. Bottom Navigation Bar -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-target="tab-camera">
+      <span class="nav-icon">📷</span>
+      <span>Ống kính AI</span>
+    </button>
+    <button class="nav-item" data-target="tab-nearby">
+      <span class="nav-icon">🧭</span>
+      <span>Quanh đây</span>
+    </button>
+    <button class="nav-item" data-target="tab-history">
+      <span class="nav-icon">📜</span>
+      <span>Đã lưu</span>
+    </button>
+  </nav>
+
+  <!-- 5. Bottom Sheet Kết quả Chi tiết -->
+  <div id="sheet-backdrop"></div>
+  <div id="result-sheet">
+    <div class="sheet-handle-area" id="sheet-drag">
+      <div class="sheet-handle"></div>
+    </div>
+    
+    <div class="sheet-header">
+      <div class="header-meta">
+        <div class="badge-row">
+          <span class="badge-type" id="res-type">DI SẢN VĂN HÓA</span>
+          <span class="badge-verified">✓ Xác thực GPS</span>
+        </div>
+        <h2 class="place-title" id="res-title">Đang phân tích...</h2>
+        <div class="place-addr" id="res-addr">Đà Nẵng – Hội An</div>
+      </div>
+      <button class="close-sheet" id="close-sheet-btn">✕</button>
+    </div>
+
+    <div class="sheet-body" id="sheet-body"></div>
+  </div>
+
+  <!-- Canvas ẩn xử lý khung hình -->
+  <canvas id="work-canvas" style="display:none;"></canvas>
+  <canvas id="diff-canvas" width="32" height="32" style="display:none;"></canvas>
+
+  <script src="app.js"></script>
+</body>
+</html>
