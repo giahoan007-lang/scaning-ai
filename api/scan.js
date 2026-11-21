@@ -6,6 +6,9 @@ const DN_HA_BOUNDS = {
   maxLng: 108.45
 };
 
+const FRIENDLY_ERROR =
+  "Opps! Mình không thể nhận diện được, có lẽ do bạn chụp không rõ hoặc mờ hoặc tối quá, bạn hãy giữ nguyên và để rõ giúp mình nhé😍";
+
 function clampToDaNangHoiAn(lat, lng, locationContext = "") {
   const numLat = Number(lat);
   const numLng = Number(lng);
@@ -68,7 +71,7 @@ function extractJson(rawText) {
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
   if (start === -1 || end === -1) {
-    throw new Error("Không tìm thấy JSON hợp lệ trong phản hồi.");
+    throw new Error("Invalid JSON");
   }
   return JSON.parse(cleaned.slice(start, end + 1));
 }
@@ -77,17 +80,13 @@ async function fetchWorkingGroqModels(apiKey) {
   const res = await fetch("https://api.groq.com/openai/v1/models", {
     headers: { Authorization: `Bearer ${apiKey}` }
   });
-  if (!res.ok) {
-    throw new Error(`Không lấy được danh sách model Groq (HTTP ${res.status}).`);
-  }
+  if (!res.ok) throw new Error("Groq models error");
   const data = await res.json();
   const allIds = (data.data || []).map((m) => m.id).filter(Boolean);
   const activeModels = allIds.filter(
     (id) => !/whisper|tts|guard|safeguard|embed|prompt-guard/i.test(id)
   );
-  if (activeModels.length === 0) {
-    throw new Error("Không tìm thấy model khả dụng trên Groq.");
-  }
+  if (!activeModels.length) throw new Error("No Groq models");
   return activeModels;
 }
 
@@ -114,9 +113,7 @@ async function callGroqVision({ apiKey, model, prompt, imageBase64, timeoutMs = 
               { type: "text", text: prompt },
               {
                 type: "image_url",
-                image_url: {
-                  url: `data:image/jpeg;base64,${imageBase64}`
-                }
+                image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
               }
             ]
           }
@@ -126,12 +123,11 @@ async function callGroqVision({ apiKey, model, prompt, imageBase64, timeoutMs = 
     });
 
     const rawText = await res.text();
-    const trimmed = rawText.trim();
     if (!res.ok) throw new Error(`${model}: HTTP ${res.status}`);
 
-    const parsed = JSON.parse(trimmed);
+    const parsed = JSON.parse(rawText.trim());
     const content = parsed.choices?.[0]?.message?.content;
-    if (!content) throw new Error(`${model}: Phản hồi rỗng.`);
+    if (!content) throw new Error("Empty content");
     return extractJson(content);
   } finally {
     clearTimeout(timer);
@@ -147,7 +143,7 @@ async function handleChatMode({ apiKey, messages, locationContext }) {
 
   const systemPrompt = `Bạn là trợ lý AIvolution thông minh, thân thiện và am hiểu sâu sắc khu vực Đà Nẵng – Hội An.
 Vị trí hiện tại của người dùng: ${locationContext || "Đà Nẵng – Hội An"}.
-Hãy trả lời ngắn gọn, rõ ràng, thực tế bằng tiếng Việt (ưu tiên gợi ý địa điểm, ăn uống, mua sắm, thời tiết, dinh dưỡng hoặc giải đáp thắc mắc ngay lập tức).`;
+Hãy trả lời ngắn gọn, rõ ràng, thực tế bằng tiếng Việt.`;
 
   const chatMessages = [
     { role: "system", content: systemPrompt },
@@ -182,34 +178,15 @@ module.exports = async (req, res) => {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
 
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Chỉ hỗ trợ phương thức POST." });
+    return res.status(405).json({ error: FRIENDLY_ERROR });
   }
 
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-
-    // --- CHẾ ĐỘ ĐỌC GIỌNG NÓI TIẾNG VIỆT TỰ NHIÊN (TTS) ---
-    if (body && body.mode === "tts") {
-      const text = String(body.text || "").trim().slice(0, 200);
-      if (!text) return res.status(400).json({ error: "Thiếu nội dung đọc." });
-
-      const ttsUrl = `https://translate.googleapis.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=vi&client=gtx`;
-      const ttsRes = await fetch(ttsUrl, {
-        headers: { "User-Agent": "Mozilla/5.0" }
-      });
-
-      if (!ttsRes.ok) {
-        return res.status(502).json({ error: "Không tải được giọng đọc." });
-      }
-
-      const arrayBuf = await ttsRes.arrayBuffer();
-      const audioBase64 = Buffer.from(arrayBuf).toString("base64");
-      return res.status(200).json({ audioBase64 });
-    }
-
     const groqKey = String(process.env.GROQ_API_KEY || "").trim();
+
     if (!groqKey) {
-      return res.status(400).json({ error: "Thiếu GROQ_API_KEY trên Vercel." });
+      return res.status(400).json({ error: FRIENDLY_ERROR });
     }
 
     // --- CHẾ ĐỘ CHATBOT ---
@@ -225,7 +202,7 @@ module.exports = async (req, res) => {
     // --- CHẾ ĐỘ QUÉT ẢNH ---
     const { imageBase64, locationContext, lat, lng } = body || {};
     if (!imageBase64) {
-      return res.status(400).json({ error: "Thiếu dữ liệu ảnh." });
+      return res.status(400).json({ error: FRIENDLY_ERROR });
     }
 
     const areaPoint = clampToDaNangHoiAn(lat, lng, locationContext);
@@ -237,9 +214,9 @@ Nhiệm vụ: Nhận diện chính xác đối tượng trong ảnh và phân lo
 - NHÓM ĐỊA ĐIỂM: "Di tích" | "Nhà hàng & Quán ăn" | "Shop & Workshop" | "Hán Nôm"
 - NHÓM VẬT PHẨM / THỨC ĂN: "Thức ăn & Đồ uống" | "Sản phẩm" | "Vật thể"
 
-Yêu cầu nội dung:
+Yêu cầu nội dung (viết văn phong kể chuyện truyền cảm, chấm phẩy rõ ràng để đọc thuyết minh thật hay):
 1. "cau_chuyen_lich_su": 2–3 câu giới thiệu rõ nguồn gốc, bối cảnh hoặc công dụng.
-2. "giai_thoai_dac_biet" (Điểm độc đáo): Viết thật hay, cuốn hút, giàu chi tiết (4–5 câu, khoảng 80–110 từ), phân tích kỹ chi tiết nhìn thấy trên ảnh (màu sắc, chất liệu, kiến trúc, hương vị...) và giá trị đặc trưng.
+2. "giai_thoai_dac_biet" (Điểm độc đáo): Viết thật hay, cuốn hút, giàu cảm xúc (4–5 câu, khoảng 80–110 từ), chấm phẩy đầy đủ, phân tích kỹ chi tiết nhìn thấy trên ảnh và giá trị đặc trưng.
 3. "thong_tin_san_pham":
    - Nếu là NHÓM VẬT PHẨM / THỨC ĂN: đặt "hien_thi": true.
      + "calo_uoc_tinh": Ước tính cụ thể lượng calo (hoặc ghi "Không áp dụng (vật dụng không ăn được)").
@@ -335,12 +312,8 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
       } catch (_) {}
     }
 
-    return res.status(502).json({
-      error: "Opps! Mình không thể nhận diện được, có lẽ do bạn chụp không rõ hoặc mờ hoặc tối quá, bạn hãy giữ nguyên và để rõ giúp mình nhé😍"
-    });
-  } catch (err) {
-    return res.status(500).json({
-      error: "Opps! Mình không thể nhận diện được, có lẽ do bạn chụp không rõ hoặc mờ hoặc tối quá, bạn hãy giữ nguyên và để rõ giúp mình nhé😍"
-    });
+    return res.status(502).json({ error: FRIENDLY_ERROR });
+  } catch (_) {
+    return res.status(500).json({ error: FRIENDLY_ERROR });
   }
 };
