@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Hồn Phố AI — Khám Phá Di Sản & Bản Địa Đà Nẵng – Hội An</title>
-  <!-- Google Fonts: Playfair Display (Tiêu đề di sản) & Plus Jakarta Sans (UI hiện đại) -->
+  <title>Hồn Phố AI — Quét Di Sản, Quán Ăn & Giải Mã Hán Việt</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -12,19 +11,7 @@
 </head>
 <body>
 
-  <!-- 1. Modal Cấu hình API Key -->
-  <div id="setup-modal">
-    <div class="modal-card">
-      <div class="modal-emblem">🏮</div>
-      <h3>Hồn Phố AI</h3>
-      <p class="modal-sub">Trợ lý thị giác giải mã di sản, chữ Hán Nôm & góc nhìn thổ địa Đà Nẵng – Hội An.</p>
-      <label class="input-label">Gemini API Key (Google AI Studio)</label>
-      <input type="password" id="api-key-input" placeholder="Dán khóa AIzaSy... của bạn" />
-      <button id="save-key-btn" class="primary-btn">Kích hoạt ống kính AI</button>
-    </div>
-  </div>
-
-  <!-- 2. Top Header Kính Mờ -->
+  <!-- Thanh trạng thái kính mờ trên cùng -->
   <header class="top-bar">
     <div class="brand">
       <span class="brand-icon">🏮</span>
@@ -35,21 +22,26 @@
     </div>
     <div class="gps-pill" id="gps-status">
       <span class="gps-dot"></span>
-      <span id="gps-text">Đang định vị không gian...</span>
+      <span id="gps-text">Đang định vị GPS...</span>
     </div>
-    <button class="icon-btn" id="open-modal-btn" title="Cài đặt API">⚙️</button>
   </header>
 
-  <!-- 3. Khung hiển thị chính (Chuyển đổi 3 Tab) -->
+  <!-- Khung hiển thị chính 3 Tab -->
   <main class="app-viewport">
-    
-    <!-- TAB 1: CAMERA QUÉT TỰ ĐỘNG (GOOGLE LENS) -->
+
+    <!-- TAB 1: CAMERA QUÉT TỰ ĐỘNG -->
     <section id="tab-camera" class="tab-view active">
-      <video id="video" autoplay playsinline muted></video>
+      <video id="video" autoplay playsinline webkit-playsinline muted></video>
       <img id="preview-img" alt="Ảnh đang phân tích" />
       <div class="vignette-overlay"></div>
 
-      <!-- Khung ngắm & Hiệu ứng hạt sáng Google Lens -->
+      <!-- Nút bật camera thủ công (chỉ hiện nếu Safari chặn tự động mở) -->
+      <div id="camera-fallback" class="camera-fallback" style="display:none;">
+        <button id="enable-cam-btn" class="enable-cam-btn">📷 Chạm để cấp quyền & bật Camera</button>
+        <p>Hoặc dùng nút <b>Ảnh mẫu</b> bên dưới để quét ảnh từ thư viện</p>
+      </div>
+
+      <!-- Khung ngắm Google Lens -->
       <div class="lens-overlay">
         <div class="reticle" id="reticle">
           <span></span>
@@ -60,7 +52,7 @@
         </div>
         <div class="scan-hint" id="scan-hint">
           <div class="spinner-ring" id="scan-spinner"></div>
-          <span id="hint-text">Hướng ống kính & giữ yên 1.2s vào di sản, biển hiệu...</span>
+          <span id="hint-text">Chĩa camera & giữ yên 1.2s vào di tích, biển hiệu, chữ Hán...</span>
         </div>
       </div>
 
@@ -81,35 +73,35 @@
       </div>
     </section>
 
-    <!-- TAB 2: RADAR ĐỊA ĐIỂM QUANH BẠN -->
+    <!-- TAB 2: RADAR QUANH BẠN -->
     <section id="tab-nearby" class="tab-view">
       <div class="page-container">
         <div class="page-header">
-          <h2>Radar Di Sản & Quán Quen</h2>
-          <p>Tự động quét dữ liệu bản đồ trong bán kính 100m quanh vị trí của bạn</p>
+          <h2>Radar Quanh Bạn</h2>
+          <p>Dữ liệu bản đồ thời gian thực trong bán kính 120m quanh vị trí đứng</p>
         </div>
         <div id="nearby-list" class="nearby-grid">
-          <div class="empty-state">Đang dò tìm các địa điểm lân cận qua OpenStreetMap...</div>
+          <div class="empty-state">Đang quét các di tích, quán ăn và shop lân cận qua OpenStreetMap...</div>
         </div>
       </div>
     </section>
 
-    <!-- TAB 3: SỔ TAY LỊCH SỬ ĐÃ QUÉT -->
+    <!-- TAB 3: LỊCH SỬ ĐÃ LƯU -->
     <section id="tab-history" class="tab-view">
       <div class="page-container">
         <div class="page-header">
-          <h2>Hành Trình Đã Khám Phá</h2>
-          <p>Lưu trữ các di sản, bản dịch Hán Nôm và quán ngon bạn vừa quét</p>
+          <h2>Sổ Tay Đã Khám Phá</h2>
+          <p>Lưu lại các di sản, bản phân tích Hán-Việt và quán ngon bạn vừa quét</p>
         </div>
         <div id="history-list" class="nearby-grid">
-          <div class="empty-state">Chưa có địa điểm nào được quét. Hãy thử chĩa camera vào một di tích hoặc quán ăn!</div>
+          <div class="empty-state">Chưa có địa điểm nào. Hãy hướng camera vào bất kỳ di sản, biển hiệu hay món ăn nào!</div>
         </div>
       </div>
     </section>
 
   </main>
 
-  <!-- 4. Bottom Navigation Bar -->
+  <!-- Thanh điều hướng dưới cùng -->
   <nav class="bottom-nav">
     <button class="nav-item active" data-target="tab-camera">
       <span class="nav-icon">📷</span>
@@ -125,18 +117,18 @@
     </button>
   </nav>
 
-  <!-- 5. Bottom Sheet Kết quả Chi tiết -->
+  <!-- Bottom Sheet Kết quả Chi tiết -->
   <div id="sheet-backdrop"></div>
   <div id="result-sheet">
     <div class="sheet-handle-area" id="sheet-drag">
       <div class="sheet-handle"></div>
     </div>
-    
+
     <div class="sheet-header">
       <div class="header-meta">
         <div class="badge-row">
           <span class="badge-type" id="res-type">DI SẢN VĂN HÓA</span>
-          <span class="badge-verified">✓ Xác thực GPS</span>
+          <span class="badge-verified">✓ Live Data</span>
         </div>
         <h2 class="place-title" id="res-title">Đang phân tích...</h2>
         <div class="place-addr" id="res-addr">Đà Nẵng – Hội An</div>
@@ -151,6 +143,8 @@
   <canvas id="work-canvas" style="display:none;"></canvas>
   <canvas id="diff-canvas" width="32" height="32" style="display:none;"></canvas>
 
+  <!-- Puter.js: Chạy AI Vision miễn phí không cần API Key -->
+  <script src="https://js.puter.com/v2/"></script>
   <script src="app.js"></script>
 </body>
 </html>
