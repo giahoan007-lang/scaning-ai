@@ -1,3 +1,76 @@
+// Khung giới hạn địa lý cứng cho khu vực Đà Nẵng – Hội An
+const DN_HA_BOUNDS = {
+  minLat: 15.70,
+  maxLat: 16.20,
+  minLng: 107.90,
+  maxLng: 108.45
+};
+
+function clampToDaNangHoiAn(lat, lng, locationContext = "") {
+  const numLat = Number(lat);
+  const numLng = Number(lng);
+  const ctx = String(locationContext || "").toLowerCase();
+
+  const isInside =
+    Number.isFinite(numLat) &&
+    Number.isFinite(numLng) &&
+    numLat >= DN_HA_BOUNDS.minLat &&
+    numLat <= DN_HA_BOUNDS.maxLat &&
+    numLng >= DN_HA_BOUNDS.minLng &&
+    numLng <= DN_HA_BOUNDS.maxLng;
+
+  if (isInside) {
+    return { lat: Number(numLat.toFixed(6)), lng: Number(numLng.toFixed(6)) };
+  }
+  if (ctx.includes("hội an") || ctx.includes("hoi an")) {
+    return { lat: 15.8801, lng: 108.3380 };
+  }
+  return { lat: 16.0544, lng: 108.2022 };
+}
+
+function buildDnHaMapsUrl({ query = "", lat, lng, locationContext = "" } = {}) {
+  const point = clampToDaNangHoiAn(lat, lng, locationContext);
+  const cleanQuery = String(query || "").trim();
+  const scopedQuery = cleanQuery
+    ? (/đà nẵng|hội an/i.test(cleanQuery) ? cleanQuery : `${cleanQuery}, Đà Nẵng - Hội An`)
+    : "Đà Nẵng - Hội An";
+
+  const params = new URLSearchParams({
+    api: "1",
+    query: scopedQuery,
+    center: `${point.lat},${point.lng}`,
+    zoom: "15"
+  });
+  return `https://www.google.com/maps/search/?${params.toString()}`;
+}
+
+function buildDnHaDirectionsUrl({ destName = "", lat, lng, locationContext = "" } = {}) {
+  const origin = clampToDaNangHoiAn(lat, lng, locationContext);
+  const cleanDest = String(destName || "").trim();
+  const scopedDest = cleanDest
+    ? (/đà nẵng|hội an/i.test(cleanDest) ? cleanDest : `${cleanDest}, Đà Nẵng - Hội An`)
+    : "Hội An, Đà Nẵng";
+
+  const params = new URLSearchParams({
+    api: "1",
+    origin: `${origin.lat},${origin.lng}`,
+    destination: scopedDest,
+    travelmode: "driving"
+  });
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+function buildNearestMinimartUrl({ lat, lng, locationContext = "" } = {}) {
+  const point = clampToDaNangHoiAn(lat, lng, locationContext);
+  const params = new URLSearchParams({
+    api: "1",
+    query: "tạp hóa siêu thị minimart gần đây",
+    center: `${point.lat},${point.lng}`,
+    zoom: "16"
+  });
+  return `https://www.google.com/maps/search/?${params.toString()}`;
+}
+
 function extractJson(rawText) {
   const cleaned = String(rawText || "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -20,20 +93,16 @@ async function fetchWorkingGroqModels(apiKey) {
   }
   const data = await res.json();
   const allIds = (data.data || []).map((m) => m.id).filter(Boolean);
-
-  // Ưu tiên các model có thể đọc ảnh / multimodal đang active trên Groq, loại bỏ audio/guard/whisper
   const activeModels = allIds.filter(
     (id) => !/whisper|tts|guard|safeguard|embed|prompt-guard/i.test(id)
   );
-
   if (activeModels.length === 0) {
     throw new Error("Không tìm thấy model khả dụng trên Groq.");
   }
-
   return activeModels;
 }
 
-async function callGroqModel({ apiKey, model, prompt, imageBase64, timeoutMs = 10000 }) {
+async function callGroqModel({ apiKey, model, prompt, imageBase64, timeoutMs = 12000 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -46,8 +115,8 @@ async function callGroqModel({ apiKey, model, prompt, imageBase64, timeoutMs = 1
       },
       body: JSON.stringify({
         model,
-        temperature: 0.15,
-        max_tokens: 450,
+        temperature: 0.4,
+        max_tokens: 950,
         response_format: { type: "json_object" },
         messages: [
           {
@@ -95,7 +164,7 @@ module.exports = async (req, res) => {
 
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    const { imageBase64, locationContext } = body || {};
+    const { imageBase64, locationContext, lat, lng } = body || {};
 
     if (!imageBase64) {
       return res.status(400).json({ error: "Thiếu dữ liệu ảnh." });
@@ -106,22 +175,42 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: "Thiếu GROQ_API_KEY trên Vercel." });
     }
 
-    const prompt = `Bạn là chuyên gia văn hóa, lịch sử và thổ địa Đà Nẵng - Hội An.
-Ngữ cảnh vị trí: ${locationContext || "Đà Nẵng - Hội An"}.
-Nhận diện đối tượng trong ảnh (di tích, quán ăn, shop, workshop, đặc sản, hoặc vật thể). Trả lời ngắn gọn, súc tích bằng tiếng Việt.
+    const areaPoint = clampToDaNangHoiAn(lat, lng, locationContext);
 
-Quy tắc Hán-Việt:
-- CHỈ đặt "co_han_viet": true nếu trong ảnh THẬT SỰ CÓ CHỮ HÁN hoặc CHỮ NÔM.
-- Nếu KHÔNG có chữ Hán/Nôm -> bắt buộc đặt "co_han_viet": false và để trống các trường bên trong.
+    const prompt = `Bạn là chuyên gia văn hóa Đà Nẵng – Hội An, đồng thời là chuyên gia dinh dưỡng & phân tích sản phẩm.
+Ngữ cảnh vị trí (chỉ trong Đà Nẵng – Hội An): ${locationContext || "Đà Nẵng – Hội An"}.
+
+Nhiệm vụ: Nhận diện chính xác đối tượng trong ảnh và phân loại đúng 1 trong 2 nhóm:
+- NHÓM ĐỊA ĐIỂM: "Di tích" | "Nhà hàng & Quán ăn" | "Shop & Workshop" | "Hán Nôm"
+- NHÓM VẬT PHẨM / THỨC ĂN: "Thức ăn & Đồ uống" | "Sản phẩm" | "Vật thể"
+
+Yêu cầu nội dung:
+1. "cau_chuyen_lich_su": 2–3 câu giới thiệu rõ nguồn gốc, bối cảnh hoặc công dụng.
+2. "giai_thoai_dac_biet" (Điểm độc đáo): Viết thật hay, cuốn hút, giàu chi tiết (4–5 câu, khoảng 80–110 từ), phân tích kỹ chi tiết nhìn thấy trên ảnh (màu sắc, chất liệu, kiến trúc, hương vị...) và giá trị đặc trưng.
+3. "thong_tin_san_pham":
+   - Nếu là NHÓM VẬT PHẨM / THỨC ĂN: đặt "hien_thi": true.
+     + "calo_uoc_tinh": Ước tính cụ thể lượng calo (VD: "Khoảng 140 - 180 kcal / lon 330ml" hoặc "Không áp dụng (vật dụng không ăn được)").
+     + "tot_cho_suc_khoe": Đánh giá rõ có tốt cho sức khỏe không (VD: "Nên dùng vừa phải — chứa nhiều đường..." hoặc "Tốt cho sức khỏe — giàu đạm..."). Nếu là vật dụng thì ghi mức độ an toàn khi sử dụng.
+     + "chi_tiet_san_pham": Mô tả chi tiết thành phần chính, thương hiệu/xuất xứ, công dụng và lưu ý khi dùng.
+   - Nếu là NHÓM ĐỊA ĐIỂM: đặt "hien_thi": false và để trống các chuỗi bên trong.
+4. "danh_gia_ban_dia": Tổng hợp nhận xét chân thực theo phong cách Local Guide Đà Nẵng – Hội An.
+5. "han_viet": CHỈ đặt "co_han_viet": true nếu ảnh THẬT SỰ CÓ CHỮ HÁN/NÔM.
 
 Trả về DUY NHẤT JSON thuần theo mẫu:
 {
-  "loai_doi_tuong": "Di tích | Quán ăn | Shop & Workshop | Đặc sản | Hán Nôm | Vật thể",
-  "ten_dia_diem": "Tên chính xác",
-  "dia_chi": "Địa chỉ ngắn gọn",
+  "loai_doi_tuong": "Di tích | Nhà hàng & Quán ăn | Shop & Workshop | Hán Nôm | Thức ăn & Đồ uống | Sản phẩm | Vật thể",
+  "la_dia_diem": true,
+  "ten_dia_diem": "Tên chính xác đối tượng",
+  "dia_chi": "Địa chỉ tại Đà Nẵng / Hội An (hoặc thương hiệu/xuất xứ nếu là sản phẩm)",
   "nien_dai_hoac_gia": "Niên đại hoặc mức giá tham khảo",
-  "cau_chuyen_lich_su": "Tóm tắt lịch sử hoặc thông tin nổi bật (2-3 câu ngắn).",
-  "giai_thoai_dac_biet": "1 nét độc đáo hoặc giai thoại ngắn.",
+  "cau_chuyen_lich_su": "2–3 câu giới thiệu.",
+  "giai_thoai_dac_biet": "4–5 câu miêu tả thật hay và chi tiết về điểm độc đáo.",
+  "thong_tin_san_pham": {
+    "hien_thi": false,
+    "calo_uoc_tinh": "",
+    "tot_cho_suc_khoe": "",
+    "chi_tiet_san_pham": ""
+  },
   "han_viet": {
     "co_han_viet": false,
     "chu_goc": "",
@@ -130,8 +219,8 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
     "y_nghia_tong_the": ""
   },
   "danh_gia_ban_dia": {
-    "tom_tat": "Nhận xét nhanh từ người địa phương.",
-    "review_mau": ["Nhận xét ngắn 1", "Nhận xét ngắn 2"]
+    "tom_tat": "Tóm tắt góc nhìn của người địa phương (2 câu).",
+    "review_mau": ["Nhận xét thực tế 1", "Nhận xét thực tế 2"]
   }
 }`;
 
@@ -146,6 +235,44 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
           prompt,
           imageBase64
         });
+
+        const isPlace =
+          result.la_dia_diem === true ||
+          /di tích|nhà hàng|quán ăn|workshop|shop|hán nôm/i.test(result.loai_doi_tuong || "");
+
+        result.toa_do_khu_vuc = {
+          lat: areaPoint.lat,
+          lng: areaPoint.lng,
+          khu_vuc: "Đà Nẵng – Hội An"
+        };
+
+        if (isPlace) {
+          const placeQuery = result.ten_dia_diem || result.dia_chi || "Đà Nẵng - Hội An";
+          result.hien_chi_duong = true;
+          result.map_label = "Chỉ đường qua Google Maps";
+          result.google_maps_url = buildDnHaMapsUrl({
+            query: placeQuery,
+            lat: areaPoint.lat,
+            lng: areaPoint.lng,
+            locationContext
+          });
+          result.chi_duong_url = buildDnHaDirectionsUrl({
+            destName: placeQuery,
+            lat: areaPoint.lat,
+            lng: areaPoint.lng,
+            locationContext
+          });
+        } else {
+          result.hien_chi_duong = false;
+          result.map_label = "Tìm Tạp hóa / Siêu thị Minimart gần nhất";
+          result.google_maps_url = buildNearestMinimartUrl({
+            lat: areaPoint.lat,
+            lng: areaPoint.lng,
+            locationContext
+          });
+          result.chi_duong_url = "";
+        }
+
         return res.status(200).json(result);
       } catch (err) {
         errors.push(err.message);
