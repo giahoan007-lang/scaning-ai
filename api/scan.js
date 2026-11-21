@@ -1,47 +1,81 @@
-function parseSafeJson(text) {
-  const cleaned = String(text || "").replace(/```json|```/gi, "").trim();
+function extractJson(rawText) {
+  const cleaned = String(rawText || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/```json|```/gi, "")
+    .trim();
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
   if (start === -1 || end === -1) {
-    throw new Error("AI trả về sai định dạng.");
+    throw new Error("Không tìm thấy JSON trong phản hồi.");
   }
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-async function callAIWithTimeout({ url, apiKey, model, messages, useJsonFormat = true, timeoutMs = 12000 }) {
+function getTokens(envVal) {
+  if (!envVal) return [];
+  return envVal
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+async function askGitHubVision({ endpoint, token, model, prompt, imageBase64, useJsonMode, timeoutMs = 12000 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const headers = { "Content-Type": "application/json" };
-    if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-
-    const payload = {
+    const body = {
       model,
-      messages,
-      temperature: 0.15,
-      max_tokens: 420
+      temperature: 0.2,
+      max_tokens: 500,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:image/jpeg;base64,${imageBase64}`
+              }
+            }
+          ]
+        }
+      ]
     };
-    if (useJsonFormat) {
-      payload.response_format = { type: "json_object" };
+
+    if (useJsonMode) {
+      body.response_format = { type: "json_object" };
     }
 
-    const res = await fetch(url, {
+    const res = await fetch(endpoint, {
       method: "POST",
-      headers,
-      body: JSON.stringify(payload),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify(body),
       signal: controller.signal
     });
 
+    const text = await res.text();
+    const trimmed = text.trim();
+
     if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`HTTP ${res.status}: ${errText.slice(0, 80)}`);
+      throw new Error(`${model} HTTP ${res.status}: ${trimmed.slice(0, 100)}`);
     }
 
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) throw new Error("Phản hồi trống.");
-    return parseSafeJson(content);
+    if (!trimmed.startsWith("{")) {
+      throw new Error(`${model} trả về text thuần: ${trimmed.slice(0, 60)}`);
+    }
+
+    const json = JSON.parse(trimmed);
+    const content = json.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error(`${model} không có nội dung trả lời.`);
+    }
+
+    return extractJson(content);
   } finally {
     clearTimeout(timer);
   }
@@ -49,8 +83,9 @@ async function callAIWithTimeout({ url, apiKey, model, messages, useJsonFormat =
 
 module.exports = async (req, res) => {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
+
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Chỉ hỗ trợ POST." });
+    return res.status(405).json({ error: "Chỉ hỗ trợ phương thức POST." });
   }
 
   try {
@@ -61,17 +96,24 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: "Thiếu dữ liệu ảnh." });
     }
 
-    const prompt = `Thổ địa & chuyên gia lịch sử Đà Nẵng - Hội An. Ngữ cảnh: ${locationContext || "Đà Nẵng - Hội An"}.
-Nhận diện nhanh đối tượng trong ảnh (di tích, quán ăn, shop, workshop, đặc sản). Trả lời thật ngắn gọn, súc tích.
-Quy tắc Hán-Việt: CHỈ đặt "co_han_viet":true nếu ảnh THẬT SỰ CÓ CHỮ HÁN/NÔM, nếu không bắt buộc để false và rỗng.
-Trả về DUY NHẤT JSON thuần tiếng Việt:
+    const tokens = getTokens(process.env.GITHUB_TOKEN);
+    if (tokens.length === 0) {
+      return res.status(400).json({ error: "Chưa cấu hình GITHUB_TOKEN trên Vercel." });
+    }
+
+    const prompt = `Bạn là chuyên gia văn hóa, lịch sử và thổ địa Đà Nẵng - Hội An.
+Ngữ cảnh vị trí: ${locationContext || "Đà Nẵng - Hội An"}.
+Hãy nhìn vào ảnh và nhận diện đối tượng (di tích, quán ăn, shop, workshop, đặc sản, hoặc vật thể).
+Nếu trong ảnh CÓ CHỮ HÁN hoặc CHỮ NÔM thật sự thì đặt "co_han_viet": true và dịch; nếu KHÔNG có chữ Hán/Nôm thì đặt "co_han_viet": false và để trống các trường Hán-Việt.
+
+Chỉ trả về 1 JSON tiếng Việt hợp lệ theo mẫu:
 {
-  "loai_doi_tuong": "Di tích | Quán ăn | Shop & Workshop | Đặc sản | Hán Nôm",
+  "loai_doi_tuong": "Di tích | Quán ăn | Shop & Workshop | Đặc sản | Hán Nôm | Vật thể",
   "ten_dia_diem": "Tên chính xác",
   "dia_chi": "Địa chỉ ngắn gọn",
   "nien_dai_hoac_gia": "Niên đại hoặc mức giá",
-  "cau_chuyen_lich_su": "Tóm tắt lịch sử hoặc điểm nổi bật (tối đa 2 câu ngắn).",
-  "giai_thoai_dac_biet": "1 nét độc đáo hoặc giai thoại ngắn (1 câu).",
+  "cau_chuyen_lich_su": "Thông tin hoặc câu chuyện ngắn (2-3 câu).",
+  "giai_thoai_dac_biet": "1 điểm độc đáo hoặc giai thoại ngắn.",
   "han_viet": {
     "co_han_viet": false,
     "chu_goc": "",
@@ -80,63 +122,40 @@ Trả về DUY NHẤT JSON thuần tiếng Việt:
     "y_nghia_tong_the": ""
   },
   "danh_gia_ban_dia": {
-    "tom_tat": "Lời khuyên nhanh từ người địa phương (1 câu).",
-    "review_mau": ["Nhận xét ngắn 1", "Nhận xét ngắn 2"]
+    "tom_tat": "Nhận xét nhanh từ người địa phương.",
+    "review_mau": ["Nhận xét 1", "Nhận xét 2"]
   }
 }`;
 
-    const messages = [
-      {
-        role: "user",
-        content: [
-          { type: "text", text: prompt },
-          {
-            type: "image_url",
-            image_url: {
-              url: `data:image/jpeg;base64,${imageBase64}`,
-              detail: "auto"
-            }
-          }
-        ]
-      }
+    // Thử lần lượt các endpoint & model nhận ảnh của GitHub Models (có và không ép json_object)
+    const targets = [
+      { endpoint: "https://models.github.ai/inference/chat/completions", model: "openai/gpt-4o-mini", useJsonMode: true },
+      { endpoint: "https://models.inference.ai.azure.com/chat/completions", model: "gpt-4o-mini", useJsonMode: false },
+      { endpoint: "https://models.inference.ai.azure.com/chat/completions", model: "gpt-4o", useJsonMode: false },
+      { endpoint: "https://models.github.ai/inference/chat/completions", model: "openai/gpt-4o", useJsonMode: false }
     ];
 
     const errors = [];
 
-    // Ưu tiên 1: GitHub Models (tốc độ ~1-2 giây bằng chính nick GitHub miễn phí)
-    if (process.env.GITHUB_TOKEN) {
-      try {
-        const result = await callAIWithTimeout({
-          url: "https://models.github.ai/inference/chat/completions",
-          apiKey: process.env.GITHUB_TOKEN,
-          model: "openai/gpt-4o-mini",
-          messages,
-          useJsonFormat: true,
-          timeoutMs: 10000
-        });
-        return res.status(200).json(result);
-      } catch (e) {
-        errors.push("GitHub: " + e.message);
+    for (const token of tokens) {
+      for (const t of targets) {
+        try {
+          const result = await askGitHubVision({
+            ...t,
+            token,
+            prompt,
+            imageBase64,
+            timeoutMs: 12000
+          });
+          return res.status(200).json(result);
+        } catch (err) {
+          errors.push(err.message);
+        }
       }
     }
 
-    
-    try {
-      const result = await callAIWithTimeout({
-        url: "https://text.pollinations.ai/openai",
-        apiKey: "",
-        model: "openai",
-        messages,
-        useJsonFormat: false,
-        timeoutMs: 14000
-      });
-      return res.status(200).json(result);
-    } catch (e) {
-      errors.push("FreeAI: " + e.message);
-    }
-
     return res.status(502).json({
-      error: "Máy chủ AI đang bận, hãy bấm chụp lại! (" + errors.join(" | ") + ")"
+      error: "Không gọi được GitHub Models để đọc ảnh: " + errors.slice(-3).join(" | ")
     });
   } catch (err) {
     return res.status(500).json({ error: err.message || "Lỗi máy chủ." });
