@@ -195,7 +195,7 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
         model: "openrouter/free",
         useJsonFormat: false,
         extraHeaders: {
-          "HTTP-Referer": "https://scaning-ai-zmr5.vercel.app",
+          "HTTP-Referer": "https://scaning-ai-882b.vercel.app",
           "X-Title": "Hon Pho AI"
         },
         timeoutMs: 11000
