@@ -10,6 +10,8 @@ let facingMode = "environment";
 let currentStream = null;
 let currentCoords = { lat: null, lng: null };
 let currentSpeechText = "";
+let isSpeaking = false;
+let cachedViVoice = null;
 
 async function startCamera() {
   if (currentStream) {
@@ -45,19 +47,101 @@ function initGPS() {
   );
 }
 
+// Tự tìm giọng tiếng Việt hay nhất trên thiết bị
+function pickBestVietnameseVoice() {
+  if (!("speechSynthesis" in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices || voices.length === 0) return null;
+
+  const viVoices = voices.filter((v) =>
+    (v.lang || "").toLowerCase().includes("vi")
+  );
+  if (viVoices.length === 0) return null;
+
+  const preferredKeywords = ["hoaimy", "namminh", "google", "enhanced", "premium", "linh"];
+  for (const kw of preferredKeywords) {
+    const found = viVoices.find((v) => v.name.toLowerCase().includes(kw));
+    if (found) return found;
+  }
+  return viVoices[0];
+}
+
+if ("speechSynthesis" in window) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    cachedViVoice = pickBestVietnameseVoice();
+  };
+}
+
+function updateSpeakButton(playing) {
+  const btn = document.getElementById("speakBtn");
+  if (!btn) return;
+  btn.textContent = playing ? "⏹️ Dừng thuyết minh" : "🔊 Nghe thuyết minh";
+}
+
 function speakText(text) {
-  if (!("speechSynthesis" in window)) return;
+  if (!("speechSynthesis" in window)) {
+    alert("Trình duyệt này chưa hỗ trợ đọc giọng nói.");
+    return;
+  }
+
+  // Nếu đang đọc mà bấm lại -> dừng đọc
+  if (isSpeaking) {
+    window.speechSynthesis.cancel();
+    isSpeaking = false;
+    updateSpeakButton(false);
+    return;
+  }
+
   window.speechSynthesis.cancel();
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = "vi-VN";
-  utter.rate = 1.0;
-  window.speechSynthesis.speak(utter);
+  const cleanText = String(text || "")
+    .replace(/[*#_•]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleanText) return;
+
+  // Tách thành từng câu ngắn để đọc có ngắt nghỉ tự nhiên và tránh bị iOS cắt giữa chừng
+  const sentences = cleanText.match(/[^.!?]+[.!?]*/g) || [cleanText];
+  const voice = cachedViVoice || pickBestVietnameseVoice();
+
+  isSpeaking = true;
+  updateSpeakButton(true);
+
+  let index = 0;
+  function speakNext() {
+    if (!isSpeaking || index >= sentences.length) {
+      isSpeaking = false;
+      updateSpeakButton(false);
+      return;
+    }
+
+    const utter = new SpeechSynthesisUtterance(sentences[index].trim());
+    utter.lang = "vi-VN";
+    if (voice) utter.voice = voice;
+    utter.rate = 0.96;
+    utter.pitch = 1.04;
+
+    utter.onend = () => {
+      index++;
+      speakNext();
+    };
+    utter.onerror = () => {
+      isSpeaking = false;
+      updateSpeakButton(false);
+    };
+
+    window.speechSynthesis.speak(utter);
+  }
+
+  speakNext();
 }
 
 function closeSheet() {
   if ("speechSynthesis" in window) {
     window.speechSynthesis.cancel();
   }
+  isSpeaking = false;
+  updateSpeakButton(false);
   sheet.classList.remove("open");
 }
 
@@ -67,7 +151,7 @@ window.closeSheet = closeSheet;
 async function scanBase64(imageBase64) {
   const startTime = performance.now();
   statusPill.classList.add("show");
-  sheet.classList.remove("open");
+  closeSheet();
 
   try {
     const locationContext = currentCoords.lat
@@ -161,7 +245,7 @@ function renderResult(data, elapsed) {
     <div class="meta">📍 ${data.dia_chi || "Đà Nẵng – Hội An"} • ${data.nien_dai_hoac_gia || ""} • ⚡ ${elapsed}s</div>
 
     <div class="action-row">
-      <button class="btn-primary" onclick="speakText(currentSpeechText)">🔊 Nghe thuyết minh</button>
+      <button id="speakBtn" class="btn-primary" onclick="speakText(currentSpeechText)">🔊 Nghe thuyết minh</button>
       ${mapButtonBlock}
     </div>
 
