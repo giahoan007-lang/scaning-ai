@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Hồn Phố AI — Khám Phá Đà Nẵng & Hội An</title>
-  <link rel="stylesheet" href="style.css?v=4" />
+  <link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
 
@@ -19,7 +19,7 @@
     </div>
     <button class="gps-pill" id="gps-status" type="button">
       <span class="gps-dot" id="gps-dot"></span>
-      <span id="gps-text">Chạm để bật GPS</span>
+      <span id="gps-text">Đang định vị...</span>
     </button>
   </header>
 
@@ -32,7 +32,7 @@
       <img id="preview-img" alt="Ảnh đang phân tích" />
       <div class="vignette-overlay"></div>
 
-      <!-- Nút bật Camera 1 chạm (dự phòng cho Safari iPhone) -->
+      <!-- Chỉ hiện nếu trình duyệt (Telegram/Zalo) chặn mở Camera tự động -->
       <div id="camera-fallback" class="camera-fallback" style="display:none;">
         <button id="enable-cam-btn" class="enable-cam-btn" type="button">📷 Chạm để mở Camera</button>
         <p id="cam-error-msg">Hoặc bấm <b>Ảnh mẫu</b> bên dưới để quét ảnh từ máy</p>
@@ -49,14 +49,14 @@
         </div>
         <div class="scan-hint" id="scan-hint">
           <div class="spinner-ring"></div>
-          <span id="hint-text">Hướng camera vào địa điểm, di tích hoặc quán ăn...</span>
+          <span id="hint-text">Đang bật ống kính tự động quét...</span>
         </div>
       </div>
 
       <!-- Thanh điều khiển Camera -->
       <div class="camera-dock">
         <button class="dock-pill active" id="auto-toggle" type="button">
-          <span>⚡</span> <span id="auto-label">Tự động</span>
+          <span id="auto-icon">⚡</span> <span id="auto-label">Tự quét: BẬT</span>
         </button>
 
         <button class="shutter-btn" id="shutter-btn" type="button" title="Quét ngay">
@@ -78,7 +78,7 @@
           <p>Tự động quét địa điểm quanh tọa độ GPS hiện tại</p>
         </div>
         <div id="nearby-list" class="nearby-grid">
-          <div class="empty-state">Bấm vào nút <b>GPS</b> góc trên bên phải để dò các di tích, quán ăn quanh bạn.</div>
+          <div class="empty-state">Đang dò tìm các di tích, quán ăn và shop trong bán kính 120m...</div>
         </div>
       </div>
     </section>
@@ -140,6 +140,6 @@
   <canvas id="work-canvas" style="display:none;"></canvas>
   <canvas id="diff-canvas" width="32" height="32" style="display:none;"></canvas>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>
