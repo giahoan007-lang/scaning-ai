@@ -11,7 +11,7 @@ let currentStream = null;
 let currentCoords = { lat: null, lng: null };
 let currentSpeechText = "";
 let isSpeaking = false;
-let cachedViVoice = null;
+let lockedVoice = null;
 
 async function startCamera() {
   if (currentStream) {
@@ -47,28 +47,29 @@ function initGPS() {
   );
 }
 
-// Tự tìm giọng tiếng Việt hay nhất trên thiết bị
-function pickBestVietnameseVoice() {
+// Khóa cứng 1 giọng nữ tiếng Việt duy nhất (Linh trên iOS/Mac, HoaiMy trên Windows, Google trên Android)
+function getSingleVietnameseVoice() {
+  if (lockedVoice) return lockedVoice;
   if (!("speechSynthesis" in window)) return null;
+
   const voices = window.speechSynthesis.getVoices();
   if (!voices || voices.length === 0) return null;
 
   const viVoices = voices.filter((v) =>
     (v.lang || "").toLowerCase().includes("vi")
   );
-  if (viVoices.length === 0) return null;
+  lockedVoice =
+    viVoices.find((v) => /linh|hoaimy|google/i.test(v.name)) ||
+    viVoices[0] ||
+    null;
 
-  const preferredKeywords = ["hoaimy", "namminh", "google", "enhanced", "premium", "linh"];
-  for (const kw of preferredKeywords) {
-    const found = viVoices.find((v) => v.name.toLowerCase().includes(kw));
-    if (found) return found;
-  }
-  return viVoices[0];
+  return lockedVoice;
 }
 
 if ("speechSynthesis" in window) {
+  getSingleVietnameseVoice();
   window.speechSynthesis.onvoiceschanged = () => {
-    cachedViVoice = pickBestVietnameseVoice();
+    if (!lockedVoice) getSingleVietnameseVoice();
   };
 }
 
@@ -102,7 +103,7 @@ function speakText(text) {
 
   // Tách thành từng câu ngắn để đọc có ngắt nghỉ tự nhiên và tránh bị iOS cắt giữa chừng
   const sentences = cleanText.match(/[^.!?]+[.!?]*/g) || [cleanText];
-  const voice = cachedViVoice || pickBestVietnameseVoice();
+  const voice = getSingleVietnameseVoice();
 
   isSpeaking = true;
   updateSpeakButton(true);
