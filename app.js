@@ -9,6 +9,8 @@ const historyBadge = document.getElementById("historyBadge");
 
 const HISTORY_KEY = "aivolution_scan_history_v1";
 const MAX_HISTORY = 30;
+const FRIENDLY_ERROR_MSG =
+  "Opps! Mình không thể nhận diện được, có lẽ do bạn chụp không rõ hoặc mờ hoặc tối quá, bạn hãy giữ nguyên và để rõ giúp mình nhé😍";
 
 let facingMode = "environment";
 let currentStream = null;
@@ -16,9 +18,7 @@ let currentCoords = { lat: null, lng: null };
 let currentSpeechText = "";
 let isSpeaking = false;
 let lockedVoice = null;
-
-const ttsAudio = new Audio();
-let ttsSessionId = 0;
+let speechSessionId = 0;
 
 let chatHistory = [
   {
@@ -331,7 +331,7 @@ window.deleteHistoryItem = deleteHistoryItem;
 window.clearAllHistory = clearAllHistory;
 
 // ==========================================
-// 5. CAMERA, GPS & GIỌNG ĐỌC TIẾNG VIỆT TỰ NHIÊN
+// 5. CAMERA, GPS & GIỌNG ĐỌC MƯỢT MÀ (KHÔNG CỨNG, KHÔNG GOOGLE)
 // ==========================================
 async function startCamera() {
   if (currentStream) currentStream.getTracks().forEach((t) => t.stop());
@@ -365,24 +365,28 @@ function initGPS() {
   );
 }
 
-function getSingleVietnameseVoice() {
+// Khóa 1 giọng tiếng Việt tự nhiên nhất trên thiết bị
+function getNaturalVietnameseVoice() {
   if (lockedVoice) return lockedVoice;
   if (!("speechSynthesis" in window)) return null;
   const voices = window.speechSynthesis.getVoices();
   if (!voices || voices.length === 0) return null;
 
   const viVoices = voices.filter((v) => (v.lang || "").toLowerCase().includes("vi"));
+  if (!viVoices.length) return null;
+
   lockedVoice =
-    viVoices.find((v) => /linh|hoaimy|google/i.test(v.name)) ||
-    viVoices[0] ||
-    null;
+    viVoices.find((v) => /enhanced|premium|natural|hoaimy/i.test(v.name)) ||
+    viVoices.find((v) => /linh|namminh/i.test(v.name)) ||
+    viVoices[0];
+
   return lockedVoice;
 }
 
 if ("speechSynthesis" in window) {
-  getSingleVietnameseVoice();
+  getNaturalVietnameseVoice();
   window.speechSynthesis.onvoiceschanged = () => {
-    if (!lockedVoice) getSingleVietnameseVoice();
+    if (!lockedVoice) getNaturalVietnameseVoice();
   };
 }
 
@@ -393,125 +397,75 @@ function updateSpeakButton(playing) {
 }
 
 function stopSpeaking() {
-  ttsSessionId++;
+  speechSessionId++;
   isSpeaking = false;
-  ttsAudio.pause();
-  ttsAudio.removeAttribute("src");
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   updateSpeakButton(false);
 }
 
-function splitTextForTTS(text) {
+// Chỉ tách theo câu trọn vẹn (. ! ?) để giữ nguyên dấu phẩy bên trong -> giọng lên xuống mềm mại, không bị giật cục
+function splitIntoNaturalSentences(text) {
   const clean = String(text || "")
     .replace(/[*#_•]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (!clean) return [];
+  const matches = clean.match(/[^.!?]+[.!?]*/g) || [clean];
+  return matches.map((s) => s.trim()).filter(Boolean);
+}
 
-  const rawSentences = clean.match(/[^.!?;:]+[.!?;:]*/g) || [clean];
-  const chunks = [];
-  let current = "";
-
-  for (const s of rawSentences) {
-    const part = s.trim();
-    if (!part) continue;
-    if ((current + " " + part).trim().length <= 170) {
-      current = (current + " " + part).trim();
-    } else {
-      if (current) chunks.push(current);
-      if (part.length <= 170) {
-        current = part;
-      } else {
-        const words = part.split(" ");
-        let temp = "";
-        for (const w of words) {
-          if ((temp + " " + w).trim().length <= 170) {
-            temp = (temp + " " + w).trim();
-          } else {
-            if (temp) chunks.push(temp);
-            temp = w;
-          }
-        }
-        current = temp;
-      }
-    }
+function speakText(text) {
+  if (!("speechSynthesis" in window)) {
+    alert("Trình duyệt này chưa hỗ trợ đọc giọng nói.");
+    return;
   }
-  if (current) chunks.push(current);
-  return chunks;
-}
 
-async function fetchTtsChunk(text) {
-  const res = await fetch("/api/scan", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode: "tts", text })
-  });
-  if (!res.ok) throw new Error("TTS failed");
-  const data = await res.json();
-  if (!data.audioBase64) throw new Error("Empty audio");
-  return `data:audio/mpeg;base64,${data.audioBase64}`;
-}
-
-function speakFallbackNative(text) {
-  if (!("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = "vi-VN";
-  const voice = getSingleVietnameseVoice();
-  if (voice) utter.voice = voice;
-  utter.rate = 0.96;
-  utter.onend = () => { isSpeaking = false; updateSpeakButton(false); };
-  utter.onerror = () => { isSpeaking = false; updateSpeakButton(false); };
-  window.speechSynthesis.speak(utter);
-}
-
-async function speakText(text) {
   if (isSpeaking) {
     stopSpeaking();
     return;
   }
 
-  const chunks = splitTextForTTS(text);
-  if (!chunks.length) return;
+  const sentences = splitIntoNaturalSentences(text);
+  if (!sentences.length) return;
 
-  const session = ++ttsSessionId;
+  window.speechSynthesis.cancel();
+  const session = ++speechSessionId;
+  const voice = getNaturalVietnameseVoice();
+
   isSpeaking = true;
   updateSpeakButton(true);
 
-  // Mở khóa âm thanh trên iOS Safari
-  ttsAudio.play().catch(() => {});
-
-  try {
-    let nextAudioPromise = fetchTtsChunk(chunks[0]);
-
-    for (let i = 0; i < chunks.length; i++) {
-      if (session !== ttsSessionId) return;
-
-      const audioSrc = await nextAudioPromise;
-      if (session !== ttsSessionId) return;
-
-      if (i + 1 < chunks.length) {
-        nextAudioPromise = fetchTtsChunk(chunks[i + 1]);
+  let idx = 0;
+  function speakNext() {
+    if (session !== speechSessionId || !isSpeaking || idx >= sentences.length) {
+      if (session === speechSessionId) {
+        isSpeaking = false;
+        updateSpeakButton(false);
       }
-
-      await new Promise((resolve, reject) => {
-        ttsAudio.src = audioSrc;
-        ttsAudio.playbackRate = 1.02;
-        ttsAudio.onended = resolve;
-        ttsAudio.onerror = reject;
-        ttsAudio.play().catch(reject);
-      });
+      return;
     }
 
-    if (session === ttsSessionId) {
-      isSpeaking = false;
-      updateSpeakButton(false);
-    }
-  } catch (err) {
-    if (session === ttsSessionId) {
-      speakFallbackNative(chunks.join(" "));
-    }
+    const utter = new SpeechSynthesisUtterance(sentences[idx]);
+    utter.lang = "vi-VN";
+    if (voice) utter.voice = voice;
+    utter.rate = 0.95; // Tốc độ kể chuyện tự nhiên
+    utter.pitch = 1.0; // Giữ cao độ gốc để giọng không bị méo/kim loại
+
+    utter.onend = () => {
+      idx++;
+      setTimeout(speakNext, 260); // Nghỉ nhịp nhẹ giữa các câu
+    };
+    utter.onerror = () => {
+      if (session === speechSessionId) {
+        isSpeaking = false;
+        updateSpeakButton(false);
+      }
+    };
+
+    window.speechSynthesis.speak(utter);
   }
+
+  speakNext();
 }
 
 function closeSheet() {
@@ -555,7 +509,7 @@ async function scanBase64(imageBase64, thumbDataUrl) {
       addToHistory(data, thumbDataUrl);
       renderResult(data, `${elapsed}s`, false);
     }
-  } catch (err) {
+  } catch (_) {
     renderError();
   } finally {
     statusPill.classList.remove("show");
@@ -563,14 +517,13 @@ async function scanBase64(imageBase64, thumbDataUrl) {
 }
 
 function renderError() {
-  const friendlyMsg = "Opps! Mình không thể nhận diện được, có lẽ do bạn chụp không rõ hoặc mờ hoặc tối quá, bạn hãy giữ nguyên và để rõ giúp mình nhé😍";
   sheetContent.innerHTML = `
     <div class="sheet-header">
       <div class="badges"><span class="badge-type">THỬ LẠI</span></div>
       <button class="btn-close" onclick="closeSheet()">✕</button>
     </div>
     <h2 class="title">Chưa nhận diện được</h2>
-    <div class="error-box">${friendlyMsg}</div>
+    <div class="error-box">${FRIENDLY_ERROR_MSG}</div>
     <div class="action-row" style="margin-top: 14px;">
       <button class="btn-primary" onclick="closeSheet()">🔄 Quét lại ngay</button>
     </div>
