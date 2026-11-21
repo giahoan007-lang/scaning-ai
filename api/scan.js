@@ -60,17 +60,6 @@ function buildDnHaDirectionsUrl({ destName = "", lat, lng, locationContext = "" 
   return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
 
-function buildNearestMinimartUrl({ lat, lng, locationContext = "" } = {}) {
-  const point = clampToDaNangHoiAn(lat, lng, locationContext);
-  const params = new URLSearchParams({
-    api: "1",
-    query: "tạp hóa siêu thị minimart gần đây",
-    center: `${point.lat},${point.lng}`,
-    zoom: "16"
-  });
-  return `https://www.google.com/maps/search/?${params.toString()}`;
-}
-
 function extractJson(rawText) {
   const cleaned = String(rawText || "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -102,7 +91,7 @@ async function fetchWorkingGroqModels(apiKey) {
   return activeModels;
 }
 
-async function callGroqModel({ apiKey, model, prompt, imageBase64, timeoutMs = 12000 }) {
+async function callGroqVision({ apiKey, model, prompt, imageBase64, timeoutMs = 12000 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -138,21 +127,56 @@ async function callGroqModel({ apiKey, model, prompt, imageBase64, timeoutMs = 1
 
     const rawText = await res.text();
     const trimmed = rawText.trim();
-
-    if (!res.ok) {
-      throw new Error(`${model}: HTTP ${res.status} - ${trimmed.slice(0, 80)}`);
-    }
+    if (!res.ok) throw new Error(`${model}: HTTP ${res.status}`);
 
     const parsed = JSON.parse(trimmed);
     const content = parsed.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error(`${model}: Phản hồi rỗng.`);
-    }
-
+    if (!content) throw new Error(`${model}: Phản hồi rỗng.`);
     return extractJson(content);
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function handleChatMode({ apiKey, messages, locationContext }) {
+  const models = await fetchWorkingGroqModels(apiKey);
+  // Ưu tiên model chat nhanh của Groq
+  const sortedModels = [
+    ...models.filter((m) => /llama-3\.3|llama-3\.1|gpt-oss|qwen/i.test(m)),
+    ...models.filter((m) => !/llama-3\.3|llama-3\.1|gpt-oss|qwen/i.test(m))
+  ];
+
+  const systemPrompt = `Bạn là trợ lý AIvolution thông minh, thân thiện và am hiểu sâu sắc khu vực Đà Nẵng – Hội An.
+Vị trí hiện tại của người dùng: ${locationContext || "Đà Nẵng – Hội An"}.
+Hãy trả lời ngắn gọn, rõ ràng, thực tế bằng tiếng Việt (ưu tiên gợi ý địa điểm, ăn uống, mua sắm, thời tiết, dinh dưỡng hoặc giải đáp thắc mắc ngay lập tức).`;
+
+  const chatMessages = [
+    { role: "system", content: systemPrompt },
+    ...(Array.isArray(messages) ? messages.slice(-10) : [])
+  ];
+
+  for (const model of sortedModels.slice(0, 5)) {
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.5,
+          max_tokens: 550,
+          messages: chatMessages
+        })
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const reply = data.choices?.[0]?.message?.content?.trim();
+      if (reply) return reply.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+    } catch (_) {}
+  }
+  throw new Error("Chatbot tạm thời bận, bạn thử gửi lại nhé.");
 }
 
 module.exports = async (req, res) => {
@@ -164,15 +188,26 @@ module.exports = async (req, res) => {
 
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    const { imageBase64, locationContext, lat, lng } = body || {};
-
-    if (!imageBase64) {
-      return res.status(400).json({ error: "Thiếu dữ liệu ảnh." });
-    }
-
     const groqKey = String(process.env.GROQ_API_KEY || "").trim();
+
     if (!groqKey) {
       return res.status(400).json({ error: "Thiếu GROQ_API_KEY trên Vercel." });
+    }
+
+    // --- CHẾ ĐỘ CHATBOT ---
+    if (body && body.mode === "chat") {
+      const reply = await handleChatMode({
+        apiKey: groqKey,
+        messages: body.messages,
+        locationContext: body.locationContext
+      });
+      return res.status(200).json({ reply });
+    }
+
+    // --- CHẾ ĐỘ QUÉT ẢNH ---
+    const { imageBase64, locationContext, lat, lng } = body || {};
+    if (!imageBase64) {
+      return res.status(400).json({ error: "Thiếu dữ liệu ảnh." });
     }
 
     const areaPoint = clampToDaNangHoiAn(lat, lng, locationContext);
@@ -189,9 +224,11 @@ Yêu cầu nội dung:
 2. "giai_thoai_dac_biet" (Điểm độc đáo): Viết thật hay, cuốn hút, giàu chi tiết (4–5 câu, khoảng 80–110 từ), phân tích kỹ chi tiết nhìn thấy trên ảnh (màu sắc, chất liệu, kiến trúc, hương vị...) và giá trị đặc trưng.
 3. "thong_tin_san_pham":
    - Nếu là NHÓM VẬT PHẨM / THỨC ĂN: đặt "hien_thi": true.
-     + "calo_uoc_tinh": Ước tính cụ thể lượng calo (VD: "Khoảng 140 - 180 kcal / lon 330ml" hoặc "Không áp dụng (vật dụng không ăn được)").
-     + "tot_cho_suc_khoe": Đánh giá rõ có tốt cho sức khỏe không (VD: "Nên dùng vừa phải — chứa nhiều đường..." hoặc "Tốt cho sức khỏe — giàu đạm..."). Nếu là vật dụng thì ghi mức độ an toàn khi sử dụng.
-     + "chi_tiet_san_pham": Mô tả chi tiết thành phần chính, thương hiệu/xuất xứ, công dụng và lưu ý khi dùng.
+     + "calo_uoc_tinh": Ước tính cụ thể lượng calo (hoặc ghi "Không áp dụng (vật dụng không ăn được)").
+     + "tot_cho_suc_khoe": Đánh giá rõ có tốt cho sức khỏe không (hoặc độ an toàn khi dùng).
+     + "chi_tiet_san_pham": Mô tả chi tiết thành phần, thương hiệu/xuất xứ, công dụng.
+     + "noi_mua_goi_y": Gợi ý cụ thể địa chỉ hoặc hệ thống cửa hàng uy tín tại Đà Nẵng – Hội An bán đúng vật phẩm này (VD: "Nhà sách Fahasa Đà Nẵng / Cửa hàng văn phòng phẩm", "Nhà thuốc Long Châu", "Siêu thị GO! / WinMart", "Cửa hàng điện tử FPT Shop / CellphoneS"...).
+     + "tu_khoa_mua_hang": Từ khóa ngắn gọn để tìm đúng nơi bán vật phẩm này trên Google Maps tại Đà Nẵng – Hội An (VD: "nhà sách văn phòng phẩm", "mua nước tăng lực Monster", "cửa hàng mỹ phẩm").
    - Nếu là NHÓM ĐỊA ĐIỂM: đặt "hien_thi": false và để trống các chuỗi bên trong.
 4. "danh_gia_ban_dia": Tổng hợp nhận xét chân thực theo phong cách Local Guide Đà Nẵng – Hội An.
 5. "han_viet": CHỈ đặt "co_han_viet": true nếu ảnh THẬT SỰ CÓ CHỮ HÁN/NÔM.
@@ -209,7 +246,9 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
     "hien_thi": false,
     "calo_uoc_tinh": "",
     "tot_cho_suc_khoe": "",
-    "chi_tiet_san_pham": ""
+    "chi_tiet_san_pham": "",
+    "noi_mua_goi_y": "",
+    "tu_khoa_mua_hang": ""
   },
   "han_viet": {
     "co_han_viet": false,
@@ -229,7 +268,7 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
 
     for (const model of models) {
       try {
-        const result = await callGroqModel({
+        const result = await callGroqVision({
           apiKey: groqKey,
           model,
           prompt,
@@ -249,7 +288,6 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
         if (isPlace) {
           const placeQuery = result.ten_dia_diem || result.dia_chi || "Đà Nẵng - Hội An";
           result.hien_chi_duong = true;
-          result.map_label = "Chỉ đường qua Google Maps";
           result.google_maps_url = buildDnHaMapsUrl({
             query: placeQuery,
             lat: areaPoint.lat,
@@ -263,9 +301,13 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
             locationContext
           });
         } else {
+          // Tự động tìm nơi bán ĐÚNG vật phẩm vừa quét quanh khu vực Đà Nẵng - Hội An
+          const buyQuery =
+            result.thong_tin_san_pham?.tu_khoa_mua_hang ||
+            `mua ${result.ten_dia_diem || "sản phẩm"}`;
           result.hien_chi_duong = false;
-          result.map_label = "Tìm Tạp hóa / Siêu thị Minimart gần nhất";
-          result.google_maps_url = buildNearestMinimartUrl({
+          result.google_maps_url = buildDnHaMapsUrl({
+            query: buyQuery,
             lat: areaPoint.lat,
             lng: areaPoint.lng,
             locationContext
