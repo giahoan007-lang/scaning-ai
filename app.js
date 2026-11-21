@@ -1,15 +1,19 @@
 // ==========================================
-// 1. KHỞI TẠO NHANH (KHÔNG ĐĂNG NHẬP, KHÔNG KEY)
+// 1. KHỞI TẠO CHẾ ĐỘ QUÉT SIÊU TỐC
 // ==========================================
 let scanHistory = JSON.parse(localStorage.getItem("honpho_history") || "[]");
 let customReviews = JSON.parse(localStorage.getItem("honpho_custom_reviews") || "{}");
-let autoScanEnabled = true;
+let autoScanEnabled = localStorage.getItem("honpho_auto_scan") !== "false";
 let isProcessing = false;
 let isLockedOnResult = false;
+let cooldownUntil = 0;
 let currentCoords = null;
 let nearbyPlaces = [];
+let gpsStarted = false;
+let currentAbortController = null;
+let loadingTimerInterval = null;
 
-// Quét siêu nhanh: kiểm tra mỗi 150ms, giữ yên 0.6 giây (4 nhịp) là chụp ngầm ngay
+// Kiểm tra mỗi 100ms, giữ yên 0.4 giây (4 nhịp) là tự chụp & trả kết quả ngay
 let prevFrameData = null;
 let lockedFrameData = null;
 let stableFramesCount = 0;
@@ -23,12 +27,15 @@ const cameraFallback = document.getElementById("camera-fallback");
 const camErrorMsg = document.getElementById("cam-error-msg");
 const gpsText = document.getElementById("gps-text");
 const gpsDot = document.getElementById("gps-dot");
+const autoToggleBtn = document.getElementById("auto-toggle");
+const autoIcon = document.getElementById("auto-icon");
+const autoLabel = document.getElementById("auto-label");
 
-document.getElementById("auto-toggle").addEventListener("click", toggleAutoScan);
+autoToggleBtn.addEventListener("click", toggleAutoScan);
 document.getElementById("shutter-btn").addEventListener("click", manualCapture);
 document.getElementById("file-upload").addEventListener("change", handleFileUpload);
-document.getElementById("close-sheet-btn").addEventListener("click", closeSheet);
-document.getElementById("sheet-backdrop").addEventListener("click", closeSheet);
+document.getElementById("close-sheet-btn").addEventListener("click", () => closeSheet(true));
+document.getElementById("sheet-backdrop").addEventListener("click", () => closeSheet(true));
 document.getElementById("enable-cam-btn").addEventListener("click", () => startCamera(true));
 document.getElementById("gps-status").addEventListener("click", requestGPS);
 
@@ -43,9 +50,52 @@ document.querySelectorAll(".nav-item").forEach((btn) => {
   });
 });
 
-renderHistoryTab();
-startCamera(false);
-setInterval(autoScanLoop, 150);
+// Tự đánh thức video trên Safari nếu iOS tạm dừng phát
+document.addEventListener(
+  "touchstart",
+  () => {
+    if (video.srcObject && video.paused) video.play().catch(() => {});
+  },
+  { passive: true }
+);
+
+function syncAutoButtonUI() {
+  autoToggleBtn.classList.toggle("active", autoScanEnabled);
+  autoIcon.innerText = autoScanEnabled ? "⚡" : "✋";
+  autoLabel.innerText = autoScanEnabled ? "Tự quét: BẬT" : "Tự quét: TẮT";
+
+  if (!isProcessing && !isLockedOnResult) {
+    reticle.classList.remove("scanning");
+    hintText.innerText = autoScanEnabled
+      ? "Giữ yên 0.4s để tự quét nhanh..."
+      : "Chế độ thủ công — bấm nút tròn để chụp quét";
+  }
+}
+
+function toggleAutoScan() {
+  autoScanEnabled = !autoScanEnabled;
+  localStorage.setItem("honpho_auto_scan", String(autoScanEnabled));
+  stableFramesCount = 0;
+  isLockedOnResult = false;
+  syncAutoButtonUI();
+}
+
+async function bootApp() {
+  syncAutoButtonUI();
+  renderHistoryTab();
+
+  const gpsTimer = setTimeout(() => {
+    if (!gpsStarted) requestGPS();
+  }, 1400);
+
+  await startCamera(false);
+  clearTimeout(gpsTimer);
+  if (!gpsStarted) requestGPS();
+
+  setInterval(autoScanLoop, 100);
+}
+
+bootApp();
 
 // ==========================================
 // 2. CAMERA CHUẨN SAFARI IPHONE
@@ -53,8 +103,8 @@ setInterval(autoScanLoop, 150);
 async function startCamera(isUserTap) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     cameraFallback.style.display = "block";
-    camErrorMsg.innerText = "Trình duyệt trong app khác chặn Camera. Hãy mở bằng Safari hoặc dùng Ảnh mẫu!";
-    hintText.innerText = "Bấm Ảnh mẫu để chụp & quét ngay";
+    camErrorMsg.innerText = "Trình duyệt trong Telegram/Zalo chặn Camera. Hãy mở bằng Safari!";
+    hintText.innerText = "Mở bằng Safari hoặc dùng Ảnh mẫu";
     return;
   }
 
@@ -84,26 +134,27 @@ async function startCamera(isUserTap) {
     await video.play();
 
     cameraFallback.style.display = "none";
-    hintText.innerText = "Hướng camera vào địa điểm, di tích hoặc quán ăn...";
+    syncAutoButtonUI();
   } catch (err) {
     clearTimeout(safetyTimer);
     cameraFallback.style.display = "block";
     camErrorMsg.innerText = isUserTap
-      ? "iPhone đang khóa Camera web này. Vào biểu tượng bên trái link → Cài đặt trang web → Camera → Cho phép."
+      ? "iPhone đang khóa Camera. Vào biểu tượng bên trái link → Cài đặt trang web → Camera → Cho phép."
       : "Chạm nút vàng phía trên để cấp quyền bật Camera.";
-    hintText.innerText = "Chạm nút bật Camera hoặc chọn Ảnh mẫu";
+    hintText.innerText = "Chạm mở Camera hoặc chọn Ảnh mẫu";
   }
 }
 
 // ==========================================
-// 3. ĐỊNH VỊ GPS & RADAR OPENSTREETMAP
+// 3. GPS & RADAR OPENSTREETMAP
 // ==========================================
 function requestGPS() {
+  gpsStarted = true;
   if (!navigator.geolocation) {
-    gpsText.innerText = "Không hỗ trợ GPS";
+    gpsText.innerText = "Đà Nẵng • Hội An";
     return;
   }
-  gpsText.innerText = "Đang lấy vị trí...";
+  gpsText.innerText = "Đang định vị...";
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       const { latitude, longitude } = pos.coords;
@@ -112,17 +163,17 @@ function requestGPS() {
       gpsText.innerText = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
       fetchNearbyOSM(latitude, longitude);
     },
-    (err) => {
+    () => {
       gpsDot.classList.remove("active");
-      gpsText.innerText = err.code === 1 ? "Bật Vị trí trong Cài đặt" : "Chạm thử lại GPS";
+      gpsText.innerText = "Đà Nẵng • Hội An";
     },
-    { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+    { enableHighAccuracy: false, timeout: 6000, maximumAge: 60000 }
   );
 }
 
 async function fetchNearbyOSM(lat, lng) {
   try {
-    const query = `[out:json][timeout:8];(node(around:120,${lat},${lng})[name];way(around:120,${lat},${lng})[name];);out center 15;`;
+    const query = `[out:json][timeout:6];(node(around:120,${lat},${lng})[name];way(around:120,${lat},${lng})[name];);out center 15;`;
     const res = await fetch("https://overpass-api.de/api/interpreter", {
       method: "POST",
       body: "data=" + encodeURIComponent(query)
@@ -132,7 +183,7 @@ async function fetchNearbyOSM(lat, lng) {
       .filter((e) => e.tags && e.tags.name)
       .map((e) => ({
         name: e.tags.name,
-        type: e.tags.historic || e.tags.tourism || e.tags.amenity || e.tags.shop || "Địa điểm bản địa"
+        type: e.tags.historic || e.tags.tourism || e.tags.amenity || e.tags.shop || "Địa điểm"
       }));
 
     if (nearbyPlaces.length > 0) {
@@ -151,7 +202,7 @@ function renderNearbyTab() {
       <div class="place-card-mini" onclick="window.open('https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.name + ' Đà Nẵng Hội An')}', '_blank')">
         <div>
           <h4>${p.name}</h4>
-          <span>📍 Trong bán kính 120m • ${p.type}</span>
+          <span>📍 Bán kính 120m • ${p.type}</span>
         </div>
         <span style="font-size:16px;">🗺️</span>
       </div>`
@@ -160,7 +211,7 @@ function renderNearbyTab() {
 }
 
 // ==========================================
-// 4. VÒNG LẶP QUÉT TỰ ĐỘNG (0.6 GIÂY)
+// 4. VÒNG LẶP QUÉT TỰ ĐỘNG SIÊU NHANH (0.4 GIÂY)
 // ==========================================
 function getFrameSignature() {
   const diffCanvas = document.getElementById("diff-canvas");
@@ -187,6 +238,7 @@ function autoScanLoop() {
     !isCameraTab ||
     !autoScanEnabled ||
     isProcessing ||
+    Date.now() < cooldownUntil ||
     video.readyState < 2 ||
     video.videoWidth === 0 ||
     previewImg.style.display === "block"
@@ -198,10 +250,10 @@ function autoScanLoop() {
 
   if (isLockedOnResult) {
     const moveDiff = calcFrameDiff(currentSig, lockedFrameData);
-    if (moveDiff > 20) {
+    if (moveDiff > 19) {
       isLockedOnResult = false;
-      closeSheet();
-      hintText.innerText = "Góc nhìn mới — giữ yên để quét...";
+      closeSheet(false);
+      hintText.innerText = "Góc mới — đang khóa mục tiêu...";
     }
     prevFrameData = currentSig;
     return;
@@ -210,10 +262,10 @@ function autoScanLoop() {
   const diff = calcFrameDiff(currentSig, prevFrameData);
   prevFrameData = currentSig;
 
-  if (diff < 7.5) {
+  if (diff < 8.0) {
     stableFramesCount++;
     reticle.classList.add("scanning");
-    hintText.innerText = `Đang khóa mục tiêu... (${Math.min(100, stableFramesCount * 25)}%)`;
+    hintText.innerText = `Khóa nhanh... (${Math.min(100, stableFramesCount * 25)}%)`;
 
     if (stableFramesCount >= STABLE_THRESHOLD) {
       stableFramesCount = 0;
@@ -223,15 +275,8 @@ function autoScanLoop() {
   } else {
     stableFramesCount = 0;
     reticle.classList.remove("scanning");
-    hintText.innerText = "Hướng camera vào địa điểm, di tích hoặc quán ăn...";
+    hintText.innerText = "Giữ yên 0.4s để tự quét nhanh...";
   }
-}
-
-function toggleAutoScan() {
-  autoScanEnabled = !autoScanEnabled;
-  const btn = document.getElementById("auto-toggle");
-  btn.classList.toggle("active", autoScanEnabled);
-  document.getElementById("auto-label").innerText = autoScanEnabled ? "Tự động" : "Tạm dừng";
 }
 
 function manualCapture() {
@@ -253,11 +298,11 @@ function handleFileUpload(event) {
     const img = new Image();
     img.onload = () => {
       const canvas = document.getElementById("work-canvas");
-      const scale = Math.min(1, 512 / img.width);
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
+      const scale = Math.min(1, 448 / img.width);
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
       canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-      const compressedUrl = canvas.toDataURL("image/jpeg", 0.65);
+      const compressedUrl = canvas.toDataURL("image/jpeg", 0.58);
 
       previewImg.src = compressedUrl;
       previewImg.style.display = "block";
@@ -270,52 +315,106 @@ function handleFileUpload(event) {
 
 function captureAndAnalyze() {
   const canvas = document.getElementById("work-canvas");
-  const scale = Math.min(1, 512 / (video.videoWidth || 512));
-  canvas.width = (video.videoWidth || 512) * scale;
-  canvas.height = (video.videoHeight || 384) * scale;
+  const vw = video.videoWidth || 448;
+  const vh = video.videoHeight || 336;
+  const scale = Math.min(1, 448 / vw);
+  canvas.width = Math.round(vw * scale);
+  canvas.height = Math.round(vh * scale);
   canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.65);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.58);
   analyzeViaServer(dataUrl.split(",")[1]);
 }
 
 // ==========================================
-// 5. GỌI SERVER VERCEL (/api/scan) SIÊU TỐC
+// 5. GỌI SERVER (/api/scan) + HIỆN BẢNG TỨC THÌ
 // ==========================================
+function showInstantLoadingSheet() {
+  const startTime = Date.now();
+  document.getElementById("res-type").innerText = "ĐANG QUÉT";
+  document.getElementById("res-title").innerText = "Đang nhận diện...";
+  document.getElementById("res-addr").innerText = "⚡ Đang xử lý hình ảnh tốc độ cao (0.0s)";
+  document.getElementById("sheet-body").innerHTML = `
+    <div class="info-box" style="opacity:0.75;">
+      <div style="height:14px; width:45%; background:#e7e5e4; border-radius:6px; margin-bottom:10px;"></div>
+      <div style="height:12px; width:100%; background:#f5f5f4; border-radius:6px; margin-bottom:8px;"></div>
+      <div style="height:12px; width:82%; background:#f5f5f4; border-radius:6px;"></div>
+    </div>
+    <div class="info-box" style="opacity:0.6;">
+      <div style="height:14px; width:55%; background:#e7e5e4; border-radius:6px; margin-bottom:10px;"></div>
+      <div style="height:12px; width:90%; background:#f5f5f4; border-radius:6px;"></div>
+    </div>
+  `;
+
+  document.getElementById("sheet-backdrop").classList.add("show");
+  document.getElementById("result-sheet").classList.add("open");
+
+  clearInterval(loadingTimerInterval);
+  loadingTimerInterval = setInterval(() => {
+    const sec = ((Date.now() - startTime) / 1000).toFixed(1);
+    const addrEl = document.getElementById("res-addr");
+    if (addrEl && isProcessing) {
+      addrEl.innerText = `⚡ Đang nhận diện siêu tốc (${sec}s)...`;
+    }
+  }, 100);
+}
+
 async function analyzeViaServer(base64Image) {
+  if (currentAbortController) currentAbortController.abort();
+  currentAbortController = new AbortController();
+
   isProcessing = true;
   reticle.classList.add("scanning");
-  hintText.innerText = "Đang nhận diện thông tin...";
+  hintText.innerText = "⚡ Đang phân tích nhanh...";
+  showInstantLoadingSheet();
 
-  const namesList = nearbyPlaces.map((p) => p.name);
+  const namesList = nearbyPlaces.slice(0, 5).map((p) => p.name);
   const locationContext = currentCoords
-    ? `Tọa độ GPS: (${currentCoords.lat}, ${currentCoords.lng}). Địa điểm lân cận: ${namesList.length ? namesList.join(", ") : "Chưa rõ"}.`
-    : "Khu vực Đà Nẵng - Hội An.";
+    ? `GPS(${currentCoords.lat.toFixed(4)},${currentCoords.lng.toFixed(4)}). Gần:${namesList.join(",") || "chưa rõ"}`
+    : "Đà Nẵng - Hội An";
+
+  const t0 = Date.now();
 
   try {
     const res = await fetch("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageBase64: base64Image, locationContext })
+      body: JSON.stringify({ imageBase64: base64Image, locationContext }),
+      signal: currentAbortController.signal
     });
 
     const parsed = await res.json();
     if (!res.ok || parsed.error) {
-      throw new Error(parsed.error || "Không thể kết nối máy chủ phân tích.");
+      throw new Error(parsed.error || "Không thể kết nối máy chủ AI.");
     }
 
+    parsed._elapsed = ((Date.now() - t0) / 1000).toFixed(1);
     saveToHistory(parsed);
     renderResult(parsed);
     isLockedOnResult = true;
 
     fetchWikipediaBackground(parsed.ten_dia_diem);
   } catch (err) {
-    alert("Lỗi quét: " + err.message);
-    previewImg.style.display = "none";
+    if (err.name === "AbortError") return;
+    document.getElementById("res-type").innerText = "THỬ LẠI";
+    document.getElementById("res-title").innerText = "Chưa nhận diện được";
+    document.getElementById("res-addr").innerText = err.message;
+    document.getElementById("sheet-body").innerHTML = `
+      <button class="audio-btn" id="retry-scan-btn" type="button">🔄 Quét lại ngay</button>
+    `;
+    document.getElementById("retry-scan-btn").addEventListener("click", () => {
+      closeSheet(true);
+      manualCapture();
+    });
   } finally {
+    clearInterval(loadingTimerInterval);
     isProcessing = false;
     reticle.classList.remove("scanning");
-    hintText.innerText = "Xoay camera sang góc khác để quét tiếp";
+    if (isLockedOnResult) {
+      hintText.innerText = autoScanEnabled
+        ? "Xoay camera sang chỗ khác để tự quét tiếp"
+        : "Bấm nút chụp tròn để quét mục tiêu mới";
+    }
   }
 }
 
@@ -333,7 +432,7 @@ async function fetchWikipediaBackground(placeName) {
     if (linksBox) {
       linksBox.insertAdjacentHTML(
         "afterbegin",
-        `<a class="source-link" href="${wikiUrl}" target="_blank">📚 Tư liệu Wikipedia: ${pageTitle} ↗</a>`
+        `<a class="source-link" href="${wikiUrl}" target="_blank">📚 Wikipedia: ${pageTitle} ↗</a>`
       );
     }
   } catch (e) {}
@@ -345,20 +444,21 @@ async function fetchWikipediaBackground(placeName) {
 function renderResult(data) {
   document.getElementById("res-type").innerText = data.loai_doi_tuong || "KHÁM PHÁ";
   document.getElementById("res-title").innerText = data.ten_dia_diem || "Địa điểm Đà Nẵng – Hội An";
-  document.getElementById("res-addr").innerText = `📍 ${data.dia_chi || "Đà Nẵng – Hội An"}${data.nien_dai_hoac_gia ? " • " + data.nien_dai_hoac_gia : ""}`;
+  const speedTag = data._elapsed ? ` • ⚡${data._elapsed}s` : "";
+  document.getElementById("res-addr").innerText = `📍 ${data.dia_chi || "Đà Nẵng – Hội An"}${data.nien_dai_hoac_gia ? " • " + data.nien_dai_hoac_gia : ""}${speedTag}`;
 
   const bodyEl = document.getElementById("sheet-body");
   bodyEl.innerHTML = "";
 
-  // Nút nghe thuyết minh
   const audioBtn = document.createElement("button");
   audioBtn.className = "audio-btn";
+  audioBtn.type = "button";
   audioBtn.innerHTML = "<span>🔊</span> <span>Nghe thuyết minh</span>";
   audioBtn.onclick = () =>
     speakStory(`${data.ten_dia_diem}. ${data.cau_chuyen_lich_su} ${data.giai_thoai_dac_biet || ""}`);
   bodyEl.appendChild(audioBtn);
 
-  // CHỈ hiển thị khung dịch Hán-Việt khi ảnh thực sự có chữ Hán/Nôm
+  // CHỈ hiển thị mục dịch Hán-Việt khi ảnh thực sự có chữ Hán/Nôm
   if (data.han_viet && data.han_viet.co_han_viet === true && (data.han_viet.chu_goc || data.han_viet.phien_am)) {
     const chipsHtml = (data.han_viet.phan_tich_tung_tu || [])
       .map((item) => `<span class="hanviet-chip">${item}</span>`)
@@ -376,7 +476,6 @@ function renderResult(data) {
     );
   }
 
-  // Thông tin & Câu chuyện
   bodyEl.insertAdjacentHTML(
     "beforeend",
     `<div class="info-box">
@@ -395,7 +494,6 @@ function renderResult(data) {
     );
   }
 
-  // Đánh giá từ người địa phương
   const placeKey = data.ten_dia_diem || "default";
   const aiReviews = data.danh_gia_ban_dia?.review_mau || [];
   const savedUserReviews = customReviews[placeKey] || [];
@@ -434,7 +532,6 @@ function renderResult(data) {
     inp.value = "";
   });
 
-  // Link chỉ đường & tra cứu trực tiếp
   const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(data.ten_dia_diem + " " + (data.dia_chi || "Đà Nẵng Hội An"))}`;
   const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(data.ten_dia_diem + " " + (data.dia_chi || "Đà Nẵng Hội An"))}`;
 
@@ -453,18 +550,29 @@ function renderResult(data) {
   document.getElementById("result-sheet").classList.add("open");
 }
 
-function closeSheet() {
+function closeSheet(isManualClose = true) {
   window.speechSynthesis.cancel();
+  clearInterval(loadingTimerInterval);
+  if (isProcessing && currentAbortController) {
+    currentAbortController.abort();
+    isProcessing = false;
+  }
   document.getElementById("sheet-backdrop").classList.remove("show");
   document.getElementById("result-sheet").classList.remove("open");
   previewImg.style.display = "none";
+
+  if (isManualClose) {
+    isLockedOnResult = false;
+    cooldownUntil = Date.now() + 1500;
+    syncAutoButtonUI();
+  }
 }
 
 function speakStory(text) {
   window.speechSynthesis.cancel();
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = "vi-VN";
-  utter.rate = 1.05;
+  utter.rate = 1.08;
   window.speechSynthesis.speak(utter);
 }
 
