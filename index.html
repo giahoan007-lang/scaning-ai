@@ -4,14 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Hồn Phố AI — Quét Di Sản, Quán Ăn & Giải Mã Hán Việt</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=2" />
 </head>
 <body>
 
-  <!-- Thanh trạng thái kính mờ trên cùng -->
+  <!-- Thanh trạng thái trên cùng -->
   <header class="top-bar">
     <div class="brand">
       <span class="brand-icon">🏮</span>
@@ -20,10 +17,10 @@
         <div class="brand-tag">ĐÀ NẴNG • HỘI AN</div>
       </div>
     </div>
-    <div class="gps-pill" id="gps-status">
-      <span class="gps-dot"></span>
-      <span id="gps-text">Đang định vị GPS...</span>
-    </div>
+    <button class="gps-pill" id="gps-status" type="button">
+      <span class="gps-dot" id="gps-dot"></span>
+      <span id="gps-text">Chạm để bật GPS</span>
+    </button>
   </header>
 
   <!-- Khung hiển thị chính 3 Tab -->
@@ -35,10 +32,10 @@
       <img id="preview-img" alt="Ảnh đang phân tích" />
       <div class="vignette-overlay"></div>
 
-      <!-- Nút bật camera thủ công (chỉ hiện nếu Safari chặn tự động mở) -->
+      <!-- Khung bật Camera 1 chạm (hiện nếu iPhone chặn tự động bật) -->
       <div id="camera-fallback" class="camera-fallback" style="display:none;">
-        <button id="enable-cam-btn" class="enable-cam-btn">📷 Chạm để cấp quyền & bật Camera</button>
-        <p>Hoặc dùng nút <b>Ảnh mẫu</b> bên dưới để quét ảnh từ thư viện</p>
+        <button id="enable-cam-btn" class="enable-cam-btn" type="button">📷 Chạm để mở Camera</button>
+        <p id="cam-error-msg">Hoặc bấm <b>Ảnh mẫu</b> bên dưới để quét ảnh từ máy</p>
       </div>
 
       <!-- Khung ngắm Google Lens -->
@@ -51,18 +48,18 @@
           </div>
         </div>
         <div class="scan-hint" id="scan-hint">
-          <div class="spinner-ring" id="scan-spinner"></div>
-          <span id="hint-text">Chĩa camera & giữ yên 1.2s vào di tích, biển hiệu, chữ Hán...</span>
+          <div class="spinner-ring"></div>
+          <span id="hint-text">Đang khởi động ống kính AI...</span>
         </div>
       </div>
 
       <!-- Thanh điều khiển Camera -->
       <div class="camera-dock">
-        <button class="dock-pill active" id="auto-toggle">
+        <button class="dock-pill active" id="auto-toggle" type="button">
           <span>⚡</span> <span id="auto-label">Tự động</span>
         </button>
 
-        <button class="shutter-btn" id="shutter-btn" title="Quét ngay">
+        <button class="shutter-btn" id="shutter-btn" type="button" title="Quét ngay">
           <div class="shutter-inner"></div>
         </button>
 
@@ -78,10 +75,10 @@
       <div class="page-container">
         <div class="page-header">
           <h2>Radar Quanh Bạn</h2>
-          <p>Dữ liệu bản đồ thời gian thực trong bán kính 120m quanh vị trí đứng</p>
+          <p>Tự động quét địa điểm quanh tọa độ GPS hiện tại (OpenStreetMap)</p>
         </div>
         <div id="nearby-list" class="nearby-grid">
-          <div class="empty-state">Đang quét các di tích, quán ăn và shop lân cận qua OpenStreetMap...</div>
+          <div class="empty-state">Bấm vào nút <b>GPS</b> góc trên bên phải để dò các di tích, quán ăn quanh bạn.</div>
         </div>
       </div>
     </section>
@@ -94,7 +91,7 @@
           <p>Lưu lại các di sản, bản phân tích Hán-Việt và quán ngon bạn vừa quét</p>
         </div>
         <div id="history-list" class="nearby-grid">
-          <div class="empty-state">Chưa có địa điểm nào. Hãy hướng camera vào bất kỳ di sản, biển hiệu hay món ăn nào!</div>
+          <div class="empty-state">Chưa có địa điểm nào. Hãy quét thử một di tích, biển hiệu hoặc chọn Ảnh mẫu!</div>
         </div>
       </div>
     </section>
@@ -103,15 +100,15 @@
 
   <!-- Thanh điều hướng dưới cùng -->
   <nav class="bottom-nav">
-    <button class="nav-item active" data-target="tab-camera">
+    <button class="nav-item active" data-target="tab-camera" type="button">
       <span class="nav-icon">📷</span>
       <span>Ống kính AI</span>
     </button>
-    <button class="nav-item" data-target="tab-nearby">
+    <button class="nav-item" data-target="tab-nearby" type="button">
       <span class="nav-icon">🧭</span>
       <span>Quanh đây</span>
     </button>
-    <button class="nav-item" data-target="tab-history">
+    <button class="nav-item" data-target="tab-history" type="button">
       <span class="nav-icon">📜</span>
       <span>Đã lưu</span>
     </button>
@@ -120,7 +117,7 @@
   <!-- Bottom Sheet Kết quả Chi tiết -->
   <div id="sheet-backdrop"></div>
   <div id="result-sheet">
-    <div class="sheet-handle-area" id="sheet-drag">
+    <div class="sheet-handle-area">
       <div class="sheet-handle"></div>
     </div>
 
@@ -133,7 +130,7 @@
         <h2 class="place-title" id="res-title">Đang phân tích...</h2>
         <div class="place-addr" id="res-addr">Đà Nẵng – Hội An</div>
       </div>
-      <button class="close-sheet" id="close-sheet-btn">✕</button>
+      <button class="close-sheet" id="close-sheet-btn" type="button">✕</button>
     </div>
 
     <div class="sheet-body" id="sheet-body"></div>
@@ -143,8 +140,7 @@
   <canvas id="work-canvas" style="display:none;"></canvas>
   <canvas id="diff-canvas" width="32" height="32" style="display:none;"></canvas>
 
-  <!-- Puter.js: Chạy AI Vision miễn phí không cần API Key -->
-  <script src="https://js.puter.com/v2/"></script>
-  <script src="app.js"></script>
+  <!-- Chạy thẳng app.js trước, tải AI Puter.js ngầm phía sau để web không bao giờ bị treo -->
+  <script src="app.js?v=2"></script>
 </body>
 </html>
