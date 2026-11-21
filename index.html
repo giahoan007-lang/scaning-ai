@@ -3,143 +3,47 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>AIvolution Team</title>
-  <link rel="stylesheet" href="style.css?v=6" />
+  <title>AIvolution — Nhận diện đa năng Đà Nẵng & Hội An</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <div class="camera-wrap">
+    <video id="camera" autoplay playsinline muted></video>
+    <canvas id="canvas" style="display: none;"></canvas>
 
-  <!-- Thanh trạng thái trên cùng -->
-  <header class="top-bar">
-    <div class="brand">
-      <span class="brand-icon">🏮</span>
-      <div>
-        <div class="brand-name">AIvolution</div>
-        <div class="brand-tag">Nhận diện đa năng</div>
+    <div class="top-bar">
+      <div class="brand">
+        <h1>AIvolution</h1>
+        <p>Nhận diện đa năng • Đà Nẵng – Hội An</p>
+      </div>
+      <div class="gps-badge">
+        <span id="gpsDot" class="dot"></span>
+        <span id="gpsText">Đang định vị...</span>
       </div>
     </div>
-    <button class="gps-pill" id="gps-status" type="button">
-      <span class="gps-dot" id="gps-dot"></span>
-      <span id="gps-text">Đang định vị...</span>
-    </button>
-  </header>
 
-  <!-- Khung hiển thị chính 3 Tab -->
-  <main class="app-viewport">
-
-    <!-- TAB 1: CAMERA QUÉT TỰ ĐỘNG -->
-    <section id="tab-camera" class="tab-view active">
-      <video id="video" autoplay playsinline webkit-playsinline muted></video>
-      <img id="preview-img" alt="Ảnh đang phân tích" />
-      <div class="vignette-overlay"></div>
-
-      <!-- Chỉ hiện nếu trình duyệt (Telegram/Zalo) chặn mở Camera tự động -->
-      <div id="camera-fallback" class="camera-fallback" style="display:none;">
-        <button id="enable-cam-btn" class="enable-cam-btn" type="button">📷 Chạm để mở Camera</button>
-        <p id="cam-error-msg">Hoặc bấm <b>Ảnh mẫu</b> bên dưới để quét ảnh từ máy</p>
-      </div>
-
-      <!-- Khung ngắm Google Lens -->
-      <div class="lens-overlay">
-        <div class="reticle" id="reticle">
-          <span></span>
-          <div class="scan-line"></div>
-          <div class="lens-sparkles">
-            <i></i><i></i><i></i><i></i><i></i>
-          </div>
-        </div>
-        <div class="scan-hint" id="scan-hint">
-          <div class="spinner-ring"></div>
-          <span id="hint-text">Đang bật ống kính tự động quét...</span>
-        </div>
-      </div>
-
-      <!-- Thanh điều khiển Camera -->
-      <div class="camera-dock">
-        <button class="dock-pill active" id="auto-toggle" type="button">
-          <span id="auto-icon">⚡</span> <span id="auto-label">Tự quét: BẬT</span>
-        </button>
-
-        <button class="shutter-btn" id="shutter-btn" type="button" title="Quét ngay">
-          <div class="shutter-inner"></div>
-        </button>
-
-        <label class="dock-pill" style="cursor:pointer;">
-          <span>🖼️</span> <span>Ảnh mẫu</span>
-          <input type="file" id="file-upload" accept="image/*" style="display:none" />
-        </label>
-      </div>
-    </section>
-
-    <!-- TAB 2: RADAR QUANH BẠN -->
-    <section id="tab-nearby" class="tab-view">
-      <div class="page-container">
-        <div class="page-header">
-          <h2>Radar Quanh Bạn</h2>
-          <p>Tự động quét địa điểm quanh tọa độ GPS hiện tại</p>
-        </div>
-        <div id="nearby-list" class="nearby-grid">
-          <div class="empty-state">Đang dò tìm các di tích, quán ăn và shop trong bán kính 120m...</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 3: LỊCH SỬ ĐÃ LƯU -->
-    <section id="tab-history" class="tab-view">
-      <div class="page-container">
-        <div class="page-header">
-          <h2>Sổ Tay Đã Khám Phá</h2>
-          <p>Lưu lại các di sản, quán ngon và địa điểm bạn vừa quét</p>
-        </div>
-        <div id="history-list" class="nearby-grid">
-          <div class="empty-state">Chưa có địa điểm nào. Hãy hướng camera vào bất kỳ nơi nào bạn muốn khám phá!</div>
-        </div>
-      </div>
-    </section>
-
-  </main>
-
-  <!-- Thanh điều hướng dưới cùng -->
-  <nav class="bottom-nav">
-    <button class="nav-item active" data-target="tab-camera" type="button">
-      <span class="nav-icon">📷</span>
-      <span>Ống kính AI</span>
-    </button>
-    <button class="nav-item" data-target="tab-nearby" type="button">
-      <span class="nav-icon">🧭</span>
-      <span>Quanh đây</span>
-    </button>
-    <button class="nav-item" data-target="tab-history" type="button">
-      <span class="nav-icon">📜</span>
-      <span>Đã lưu</span>
-    </button>
-  </nav>
-
-  <!-- Bottom Sheet Kết quả Chi tiết -->
-  <div id="sheet-backdrop"></div>
-  <div id="result-sheet">
-    <div class="sheet-handle-area">
-      <div class="sheet-handle"></div>
+    <div class="reticle">
+      <span class="tl"></span>
+      <span class="tr"></span>
+      <span class="bl"></span>
+      <span class="br"></span>
     </div>
 
-    <div class="sheet-header">
-      <div class="header-meta">
-        <div class="badge-row">
-          <span class="badge-type" id="res-type">KHÁM PHÁ</span>
-          <span class="badge-verified">✓ Live AI</span>
-        </div>
-        <h2 class="place-title" id="res-title">Đang phân tích...</h2>
-        <div class="place-addr" id="res-addr">Đà Nẵng – Hội An</div>
-      </div>
-      <button class="close-sheet" id="close-sheet-btn" type="button">✕</button>
-    </div>
+    <div id="statusPill" class="status-pill">⚡ Đang phân tích nhanh...</div>
 
-    <div class="sheet-body" id="sheet-body"></div>
+    <div class="controls">
+      <button class="btn-icon" id="uploadBtn" title="Chọn ảnh từ máy">🖼️</button>
+      <button class="btn-capture" id="captureBtn" title="Chụp & Quét"></button>
+      <button class="btn-icon" id="switchBtn" title="Đổi camera">🔄</button>
+      <input type="file" id="fileInput" accept="image/*" style="display: none;" />
+    </div>
   </div>
 
-  <!-- Canvas ẩn xử lý khung hình -->
-  <canvas id="work-canvas" style="display:none;"></canvas>
-  <canvas id="diff-canvas" width="32" height="32" style="display:none;"></canvas>
+  <div id="sheet" class="sheet">
+    <div class="sheet-handle"></div>
+    <div id="sheetContent"></div>
+  </div>
 
-  <script src="app.js?v=6"></script>
+  <script src="app.js"></script>
 </body>
 </html>
