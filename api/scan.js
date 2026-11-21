@@ -82,50 +82,23 @@ async function callVisionProvider({
     const trimmed = rawBody.trim();
 
     if (!res.ok) {
-      throw new Error(`${name} HTTP ${res.status}: ${trimmed.slice(0, 90)}`);
+      throw new Error(`${name}[${model}] HTTP ${res.status}: ${trimmed.slice(0, 80)}`);
     }
 
     if (trimmed === "OK" || !trimmed.startsWith("{")) {
-      throw new Error(`${name} trả về phản hồi không phải JSON (${trimmed.slice(0, 40)})`);
+      throw new Error(`${name}[${model}] phản hồi không phải JSON (${trimmed.slice(0, 40)})`);
     }
 
     const parsed = JSON.parse(trimmed);
     const content = parsed.choices?.[0]?.message?.content;
     if (!content) {
-      throw new Error(`${name} không có nội dung phản hồi.`);
+      throw new Error(`${name}[${model}] nội dung rỗng.`);
     }
 
     return extractJson(content);
   } finally {
     clearTimeout(timer);
   }
-}
-
-function buildLocationFallback(locationContext) {
-  return {
-    loai_doi_tuong: "Khám phá bản địa",
-    ten_dia_diem: "Địa điểm quanh khu vực Đà Nẵng – Hội An",
-    dia_chi: locationContext || "Đà Nẵng – Hội An",
-    nien_dai_hoac_gia: "Đang cập nhật",
-    cau_chuyen_lich_su:
-      "Các cổng AI đọc ảnh miễn phí hiện đang tạm bận hoặc chưa được cấu hình đủ key. Bạn có thể xem các địa điểm lân cận qua GPS tại tab Quanh đây hoặc thử quét lại sau ít giây.",
-    giai_thoai_dac_biet:
-      "Đà Nẵng và Hội An nổi bật với hệ thống di tích lịch sử, biển hiệu mang nét chữ Hán-Nôm và ẩm thực địa phương phong phú.",
-    han_viet: {
-      co_han_viet: false,
-      chu_goc: "",
-      phien_am: "",
-      phan_tich_tung_tu: [],
-      y_nghia_tong_the: ""
-    },
-    danh_gia_ban_dia: {
-      tom_tat: "Nên kiểm tra tab Quanh đây để xem danh sách địa điểm thực tế quanh vị trí GPS.",
-      review_mau: [
-        "Giữ camera thẳng và đủ sáng khi quét biển hiệu hoặc di tích.",
-        "Gắn GROQ_API_KEY hoặc OPENROUTER_API_KEY vào Environment Variables trên Vercel để quét ảnh trực tiếp."
-      ]
-    }
-  };
 }
 
 module.exports = async (req, res) => {
@@ -145,7 +118,7 @@ module.exports = async (req, res) => {
 
     const prompt = `Bạn là chuyên gia văn hóa, lịch sử và thổ địa Đà Nẵng - Hội An.
 Ngữ cảnh vị trí: ${locationContext || "Đà Nẵng - Hội An"}.
-Nhận diện nhanh đối tượng trong ảnh (di tích, quán ăn, shop, workshop, đặc sản, hoặc vật thể). Trả lời ngắn gọn, súc tích bằng tiếng Việt.
+Hãy nhìn vào ảnh và nhận diện chính xác đối tượng (di tích, quán ăn, shop, workshop, đặc sản, hoặc vật thể/thiết bị thực tế). Trả lời ngắn gọn, súc tích bằng tiếng Việt.
 
 Quy tắc Hán-Việt:
 - CHỈ đặt "co_han_viet": true nếu trong ảnh THẬT SỰ CÓ CHỮ HÁN hoặc CHỮ NÔM.
@@ -155,9 +128,9 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
 {
   "loai_doi_tuong": "Di tích | Quán ăn | Shop & Workshop | Đặc sản | Hán Nôm | Vật thể",
   "ten_dia_diem": "Tên chính xác",
-  "dia_chi": "Địa chỉ ngắn gọn",
+  "dia_chi": "Địa chỉ ngắn gọn hoặc bối cảnh",
   "nien_dai_hoac_gia": "Niên đại hoặc mức giá tham khảo",
-  "cau_chuyen_lich_su": "Tóm tắt lịch sử hoặc thông tin nổi bật (2-3 câu ngắn).",
+  "cau_chuyen_lich_su": "Thông tin hoặc câu chuyện ngắn (2-3 câu ngắn).",
   "giai_thoai_dac_biet": "1 nét độc đáo hoặc giai thoại ngắn.",
   "han_viet": {
     "co_han_viet": false,
@@ -167,43 +140,56 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
     "y_nghia_tong_the": ""
   },
   "danh_gia_ban_dia": {
-    "tom_tat": "Nhận xét nhanh từ người địa phương.",
+    "tom_tat": "Nhận xét nhanh.",
     "review_mau": ["Nhận xét ngắn 1", "Nhận xét ngắn 2"]
   }
 }`;
 
     const providers = [];
 
-    // 1. Ưu tiên Groq (nhanh, miễn phí không cần thẻ)
-    for (const key of getKeyList(process.env.GROQ_API_KEY)) {
-      providers.push({
-        name: "Groq",
-        url: "https://api.groq.com/openai/v1/chat/completions",
-        apiKey: key,
-        model: "meta-llama/llama-4-scout-17b-16e-instruct",
-        useJsonFormat: true,
-        timeoutMs: 9500
-      });
+    const groqKeys = getKeyList(process.env.GROQ_API_KEY);
+    const groqModels = [
+      "meta-llama/llama-4-scout-17b-16e-instruct",
+      "meta-llama/llama-4-maverick-17b-128e-instruct"
+    ];
+    for (const key of groqKeys) {
+      for (const model of groqModels) {
+        providers.push({
+          name: "Groq",
+          url: "https://api.groq.com/openai/v1/chat/completions",
+          apiKey: key,
+          model,
+          useJsonFormat: true,
+          timeoutMs: 9500
+        });
+      }
     }
 
-    // 2. Dự phòng OpenRouter (miễn phí không cần thẻ)
-    for (const key of getKeyList(process.env.OPENROUTER_API_KEY)) {
-      providers.push({
-        name: "OpenRouter",
-        url: "https://openrouter.ai/api/v1/chat/completions",
-        apiKey: key,
-        model: "openrouter/free",
-        useJsonFormat: false,
-        extraHeaders: {
-          "HTTP-Referer": "https://scaning-ai-882b.vercel.app",
-          "X-Title": "Hon Pho AI"
-        },
-        timeoutMs: 11000
-      });
+    const openRouterKeys = getKeyList(process.env.OPENROUTER_API_KEY);
+    const openRouterModels = [
+      "openrouter/free",
+      "google/gemma-3-27b-it:free",
+      "meta-llama/llama-3.2-11b-vision-instruct:free"
+    ];
+    for (const key of openRouterKeys) {
+      for (const model of openRouterModels) {
+        providers.push({
+          name: "OpenRouter",
+          url: "https://openrouter.ai/api/v1/chat/completions",
+          apiKey: key,
+          model,
+          useJsonFormat: false,
+          extraHeaders: {
+            "HTTP-Referer": "https://ai-882b.vercel.app",
+            "X-Title": "Hon Pho AI"
+          },
+          timeoutMs: 11000
+        });
+      }
     }
 
-    // 3. Dự phòng GitHub Models nếu có cấu hình token
-    for (const token of getKeyList(process.env.GITHUB_TOKEN)) {
+    const githubTokens = getKeyList(process.env.GITHUB_TOKEN);
+    for (const token of githubTokens) {
       providers.push({
         name: "GitHub",
         url: "https://models.github.ai/inference/chat/completions",
@@ -214,6 +200,13 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
       });
     }
 
+    if (providers.length === 0) {
+      return res.status(400).json({
+        error: "Dự án này chưa có GROQ_API_KEY hoặc OPENROUTER_API_KEY trong Vercel Environment Variables."
+      });
+    }
+
+    const errors = [];
     for (const provider of providers) {
       try {
         const result = await callVisionProvider({
@@ -223,12 +216,13 @@ Trả về DUY NHẤT JSON thuần theo mẫu:
         });
         return res.status(200).json(result);
       } catch (err) {
-        // Thử nhà cung cấp tiếp theo nếu nguồn hiện tại lỗi hoặc hết lượt
+        errors.push(err.message);
       }
     }
 
-    // Trả về phản hồi dự phòng theo ngữ cảnh thay vì báo lỗi làm đứng luồng trải nghiệm
-    return res.status(200).json(buildLocationFallback(locationContext));
+    return res.status(502).json({
+      error: errors.slice(-3).join(" | ")
+    });
   } catch (err) {
     return res.status(500).json({ error: err.message || "Lỗi máy chủ." });
   }
